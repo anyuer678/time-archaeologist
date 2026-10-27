@@ -18,7 +18,7 @@ from typing import Iterator
 
 from .util import utcnow_iso
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _BASE_STATEMENTS = [
     """CREATE TABLE IF NOT EXISTS projects (
@@ -153,6 +153,28 @@ _MIGRATIONS: dict[int, list[str]] = {
     generated_at TEXT NOT NULL,
     UNIQUE(project_id, snapshot_id, target_path))""",
         "CREATE INDEX IF NOT EXISTS idx_repro_project ON repro_checks(project_id)",
+    ],
+    # v4（2.0 第四步）：调查线索 + 规则启停配置。线索按 (project, snapshot, rule, target) 幂等。
+    4: [
+        """CREATE TABLE IF NOT EXISTS leads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    snapshot_id INTEGER NOT NULL,
+    rule_id TEXT NOT NULL,
+    rule_version INTEGER NOT NULL DEFAULT 1,
+    title TEXT NOT NULL,
+    target_path TEXT NOT NULL DEFAULT '',
+    basis TEXT NOT NULL DEFAULT '',
+    evidence TEXT NOT NULL DEFAULT '[]',
+    details TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, snapshot_id, rule_id, target_path))""",
+        "CREATE INDEX IF NOT EXISTS idx_leads_project ON leads(project_id)",
+        """CREATE TABLE IF NOT EXISTS rule_config (
+    rule_id TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT)""",
     ],
 }
 
@@ -656,3 +678,61 @@ class Database:
     def get_repro_check(self, check_id: int) -> sqlite3.Row | None:
         rows = self.query("SELECT * FROM repro_checks WHERE id=?", (check_id,))
         return rows[0] if rows else None
+
+    # ---------- 调查线索（第四步） ----------
+    def upsert_lead(self, project_id: int, snapshot_id: int, rule_id: str, rule_version: int,
+                    title: str, target_path: str, basis: str, evidence_json: str,
+                    details_json: str, now: str) -> int:
+        """保存线索，按 (project, snapshot, rule, target) 幂等；重跑只更新分析内容，
+        保留人工状态（status）与首次发现时间。"""
+        with self._session(write=True) as conn:
+            conn.execute(
+                "INSERT INTO leads(project_id, snapshot_id, rule_id, rule_version, title, "
+                "target_path, basis, evidence, details, status, created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,'open',?) "
+                "ON CONFLICT(project_id, snapshot_id, rule_id, target_path) DO UPDATE SET "
+                "rule_version=excluded.rule_version, title=excluded.title, basis=excluded.basis, "
+                "evidence=excluded.evidence, details=excluded.details",
+                (project_id, snapshot_id, rule_id, rule_version, title, target_path,
+                 basis, evidence_json, details_json, now))
+            row = conn.execute(
+                "SELECT id FROM leads WHERE project_id=? AND snapshot_id=? AND rule_id=? "
+                "AND target_path=?", (project_id, snapshot_id, rule_id, target_path)).fetchone()
+            return row[0]
+
+    def list_leads(self, project_id: int, snapshot_id: int | None = None,
+                   rule_id: str | None = None, status: str | None = None,
+                   limit: int = 500) -> list[sqlite3.Row]:
+        sql = "SELECT * FROM leads WHERE project_id=?"
+        args: list = [project_id]
+        if snapshot_id:
+            sql += " AND snapshot_id=?"
+            args.append(snapshot_id)
+        if rule_id:
+            sql += " AND rule_id=?"
+            args.append(rule_id)
+        if status:
+            sql += " AND status=?"
+            args.append(status)
+        sql += " ORDER BY id LIMIT ?"
+        args.append(limit)
+        return self.query(sql, args)
+
+    def set_lead_status(self, lead_id: int, status: str) -> None:
+        if status not in ("open", "acknowledged", "dismissed"):
+            raise ValueError(f"未知线索状态: {status}")
+        with self._session(write=True) as conn:
+            conn.execute("UPDATE leads SET status=? WHERE id=?", (status, lead_id))
+
+    # ---------- 规则启停配置（第四步） ----------
+    def get_rule_enabled(self, rule_id: str) -> bool:
+        """规则默认启用；rule_config 无记录 = 启用。"""
+        rows = self.query("SELECT enabled FROM rule_config WHERE rule_id=?", (rule_id,))
+        return bool(rows[0]["enabled"]) if rows else True
+
+    def set_rule_enabled(self, rule_id: str, enabled: bool, now: str) -> None:
+        with self._session(write=True) as conn:
+            conn.execute(
+                "INSERT INTO rule_config(rule_id, enabled, updated_at) VALUES(?,?,?) "
+                "ON CONFLICT(rule_id) DO UPDATE SET enabled=excluded.enabled, "
+                "updated_at=excluded.updated_at", (rule_id, int(enabled), now))

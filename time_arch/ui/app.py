@@ -1,12 +1,13 @@
 """时光考古机主界面（Tkinter）。
 
-区块：项目概览 / 最近发现 / 活动时间线 / 成果证据 / 扫描状态 + 快照对比。
+区块：项目概览 / 最近发现 / 活动时间线 / 成果证据 / 调查工作台 / 扫描状态 + 快照对比。
 任何发现可双击查看证据来源并定位文件记录；时间线分页加载。
 """
 from __future__ import annotations
 
 import json
 import queue
+import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -14,9 +15,10 @@ from .. import APP_NAME_CN, __version__
 from ..analyze import KIND_LABELS
 from ..classify import CATEGORY_LABELS
 from ..db import Database
+from ..investigate import LEADS_RULES, RULE_LABELS, lead_view, run_lead_analysis
 from ..reports import export_report
 from ..scanner import ScanProgress, ScanResult, ScanService
-from ..util import fmt_size, fmt_time_local
+from ..util import fmt_size, fmt_time_local, utcnow_iso
 from .theme import ACCENT, BG, FG, FG_DIM, PANEL, apply_theme
 
 EVENT_LABELS = {
@@ -25,6 +27,7 @@ EVENT_LABELS = {
 }
 CERTAINTY_LABELS = {"observed": "观察事实", "inferred": "推测"}
 FINDING_STATUS = {"auto": "自动判断", "confirmed": "人工确认", "rejected": "人工否决"}
+LEAD_STATUS = {"open": "待查看", "acknowledged": "已知悉", "dismissed": "已忽略"}
 PAGE_SIZE = 200
 
 
@@ -38,6 +41,7 @@ class App:
         self.selected_project_id: int | None = None
         self.tl_page = 0
         self._snap_map: dict[int, dict] = {}
+        self._leads_running = False
 
         root.title(f"{APP_NAME_CN} Time Archaeologist v{__version__}")
         root.geometry("1220x780")
@@ -103,6 +107,7 @@ class App:
         self._build_timeline_tab()
         self._build_recent_tab()
         self._build_findings_tab()
+        self._build_leads_tab()
         self._build_compare_tab()
 
         status = ttk.Frame(self.root)
@@ -260,6 +265,50 @@ class App:
             self.fd_tree.tag_configure(conf, foreground=color)
         self.fd_tree.tag_configure("rejected", foreground=FG_DIM)
 
+    def _build_leads_tab(self) -> None:
+        tab = ttk.Frame(self.tabs, padding=10)
+        self.tabs.add(tab, text="  调查工作台  ")
+        bar = ttk.Frame(tab)
+        bar.pack(fill="x", pady=(0, 4))
+        ttk.Button(bar, text="分析线索（最新快照）", style="Accent.TButton",
+                   command=self.on_analyze_leads).pack(side="left")
+        ttk.Button(bar, text="规则启停…", command=self._show_rules_dialog
+                   ).pack(side="left", padx=(6, 12))
+        ttk.Label(bar, text="规则").pack(side="left")
+        self.ld_rule = ttk.Combobox(
+            bar, width=16, state="readonly",
+            values=["全部规则"] + [RULE_LABELS[rid] for rid, *_ in LEADS_RULES])
+        self.ld_rule.current(0)
+        self.ld_rule.pack(side="left", padx=(4, 10))
+        ttk.Label(bar, text="状态").pack(side="left")
+        self.ld_status = ttk.Combobox(
+            bar, width=8, state="readonly",
+            values=["全部状态"] + [LEAD_STATUS[s] for s in
+                                   ("open", "acknowledged", "dismissed")])
+        self.ld_status.current(0)
+        self.ld_status.pack(side="left", padx=(4, 10))
+        ttk.Button(bar, text="筛选", command=self.refresh_leads).pack(side="left")
+
+        self.ld_info = tk.StringVar(value="（左侧选择项目后，可对最新完成快照运行线索分析）")
+        ttk.Label(tab, textvariable=self.ld_info, style="Dim.TLabel", wraplength=900,
+                  justify="left").pack(anchor="w", pady=(0, 4))
+        cols = ("status", "rule", "title", "target", "snapshot")
+        self.ld_tree = ttk.Treeview(tab, columns=cols, show="headings")
+        for col, text, w, anchor in (
+                ("status", "状态", 70, "w"), ("rule", "规则", 140, "w"),
+                ("title", "问题描述", 400, "w"), ("target", "目标", 230, "w"),
+                ("snapshot", "快照", 50, "e")):
+            self.ld_tree.heading(col, text=text)
+            self.ld_tree.column(col, width=w, anchor=anchor,
+                                stretch=(col in ("title", "target")))
+        self.ld_tree.pack(fill="both", expand=True)
+        self.ld_tree.bind("<Double-1>", lambda e: self._show_lead_detail())
+        self.ld_tree.tag_configure("acknowledged", foreground="#9fbf7f")
+        self.ld_tree.tag_configure("dismissed", foreground=FG_DIM)
+        ttk.Label(tab, text="线索是「值得查看的问题」，不是结论。双击查看证据、可能的解释与"
+                            "下一步建议；重跑分析会更新线索内容但保留人工状态。",
+                  style="Dim.TLabel").pack(anchor="w", pady=(2, 0))
+
     def _build_compare_tab(self) -> None:
         tab = ttk.Frame(self.tabs, padding=10)
         self.tabs.add(tab, text="  快照对比  ")
@@ -393,6 +442,10 @@ class App:
                 elif kind == "done":
                     r: ScanResult = payload
                     self._handle_scan_done(r)
+                elif kind == "leads_done":
+                    self._handle_leads_done(payload)
+                elif kind == "leads_error":
+                    self._handle_leads_error(payload)
         except queue.Empty:
             pass
         self.root.after(120, self._poll_scan_queue)
@@ -422,6 +475,7 @@ class App:
         self.refresh_timeline()
         self.refresh_recent()
         self.refresh_findings()
+        self.refresh_leads()
         self.refresh_compare_choices()
 
     def refresh_overview(self) -> None:
@@ -585,6 +639,156 @@ class App:
         else:
             lines.append("  证据不足：该文件在此快照中无记录。")
         self._detail_dialog(f"成果证据 #{r['id']}", "\n".join(lines))
+
+    # ---------------------------------------------------------------- 调查线索
+    def refresh_leads(self) -> None:
+        for t in self.ld_tree.get_children():
+            self.ld_tree.delete(t)
+        pid = self.selected_project_id
+        if pid is None:
+            self.ld_info.set("（左侧选择项目后，可对最新完成快照运行线索分析）")
+            return
+        rule_map = {v: k for k, v in RULE_LABELS.items()}
+        status_map = {v: k for k, v in LEAD_STATUS.items()}
+        rows = self.db.list_leads(pid, rule_id=rule_map.get(self.ld_rule.get()),
+                                  status=status_map.get(self.ld_status.get()),
+                                  limit=1000)
+        open_n = sum(1 for r in rows if r["status"] == "open")
+        self.ld_info.set(
+            f"共 {len(rows)} 条线索（当前筛选），其中待查看 {open_n} 条。"
+            "线索 = 值得查看的问题，不是结论。")
+        for r in rows:
+            tags = (r["status"],) if r["status"] != "open" else ()
+            self.ld_tree.insert("", "end", iid=str(r["id"]), tags=tags, values=(
+                LEAD_STATUS.get(r["status"], r["status"]),
+                RULE_LABELS.get(r["rule_id"], r["rule_id"]),
+                r["title"], r["target_path"] or "—", f"#{r['snapshot_id']}"))
+
+    def on_analyze_leads(self) -> None:
+        if self._leads_running:
+            messagebox.showinfo("提示", "线索分析正在进行。", parent=self.root)
+            return
+        pid = self.selected_project_id
+        if pid is None:
+            messagebox.showinfo("提示", "请先在左侧选择一个项目。", parent=self.root)
+            return
+        latest = self.db.latest_snapshot(pid)
+        if latest is None:
+            messagebox.showinfo("提示", "该项目还没有完成的扫描快照，请先执行扫描。",
+                                parent=self.root)
+            return
+        self._leads_running = True
+        self.ld_info.set("线索分析中…（只读读取已扫描记录，不修改项目文件）")
+
+        def work():
+            try:
+                result = run_lead_analysis(self.db, pid, latest["id"])
+            except Exception as e:  # 后台线程异常需回传主线程，否则界面状态会卡住
+                self.scan_queue.put(("leads_error", str(e)))
+            else:
+                self.scan_queue.put(("leads_done", result))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _handle_leads_done(self, result: dict) -> None:
+        self._leads_running = False
+        by_rule = "，".join(f"{RULE_LABELS.get(rid, rid)} {n} 条"
+                            for rid, n in result["by_rule"].items())
+        self.ld_info.set(
+            f"分析完成（快照 #{result['snapshot_id']}）：共 {result['leads']} 条线索"
+            + (f" — {by_rule}" if by_rule else "（本轮启用的规则未发现问题）"))
+        self.refresh_leads()
+
+    def _handle_leads_error(self, msg: str) -> None:
+        self._leads_running = False
+        self.ld_info.set("线索分析出错。")
+        messagebox.showerror("线索分析失败", msg, parent=self.root)
+
+    def _show_lead_detail(self) -> None:
+        sel = self.ld_tree.selection()
+        if not sel:
+            return
+        lv = lead_view(self.db, int(sel[0]))
+        if lv is None:
+            return
+        lines = [
+            f"规则：{lv['rule_label']}（v{lv['rule_version']}）"
+            f" · 状态：{LEAD_STATUS.get(lv['status'], lv['status'])}",
+            f"问题描述：{lv['title']}",
+            f"目标：{lv['target_path'] or '—'} · 快照 #{lv['snapshot_id']}"
+            f" · 生成于 {fmt_time_local(lv['created_at'])}",
+            f"触发原因：{lv['basis']}",
+            "", "证据文件：",
+        ]
+        ev = lv["evidence_list"]
+        lines += [f"  - {e}" for e in ev] if ev else ["  （无证据记录）"]
+        lines += ["", "可能的解释："]
+        pe = lv["possible_explanations"]
+        lines += [f"  - {e}" for e in pe] if pe else ["  （未提供）"]
+        lines += ["", "下一步调查建议："]
+        ns = lv["next_steps"]
+        lines += [f"  - {e}" for e in ns] if ns else ["  （未提供）"]
+        lines += ["", f"误报可能性：{lv['false_positive'] or '（未提供）'}"]
+
+        win = tk.Toplevel(self.root)
+        win.title(f"线索 #{lv['id']} · {lv['rule_label']}")
+        win.geometry("760x540")
+        win.configure(bg=PANEL)
+        txt = tk.Text(win, bg=PANEL, fg=FG, insertbackground=FG, relief="flat",
+                      font=("Consolas", 10), wrap="word", padx=12, pady=10)
+        txt.insert("1.0", "\n".join(lines))
+        txt.configure(state="disabled")
+        txt.pack(fill="both", expand=True)
+        btns = ttk.Frame(win)
+        btns.pack(pady=6)
+        for label, st in (("已知悉", "acknowledged"), ("忽略", "dismissed"),
+                          ("重新打开", "open")):
+            ttk.Button(btns, text=label,
+                       command=lambda s=st: self._set_lead_status(lv["id"], s, win)
+                       ).pack(side="left", padx=3)
+        ttk.Button(btns, text="关闭", command=win.destroy).pack(side="left", padx=3)
+
+    def _set_lead_status(self, lead_id: int, status: str, win: tk.Toplevel) -> None:
+        self.db.set_lead_status(lead_id, status)
+        win.destroy()
+        self.refresh_leads()
+
+    def _show_rules_dialog(self) -> None:
+        win = tk.Toplevel(self.root)
+        win.title("调查规则启停")
+        win.geometry("820x420")
+        win.configure(bg=PANEL)
+        ttk.Label(win, text="规则可单独启停；停用的规则在下次「分析线索」时跳过，"
+                            "已入库的线索不受影响。每条规则带版本号并有独立测试样例。",
+                  style="Dim.TLabel", wraplength=790, justify="left").pack(
+            anchor="w", padx=12, pady=(10, 4))
+        cols = ("ver", "name", "desc", "state")
+        tree = ttk.Treeview(win, columns=cols, show="headings")
+        for col, text, w, anchor in (("ver", "版本", 50, "w"), ("name", "规则", 150, "w"),
+                                     ("desc", "检测内容", 400, "w"),
+                                     ("state", "状态", 60, "w")):
+            tree.heading(col, text=text)
+            tree.column(col, width=w, anchor=anchor)
+        tree.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+        for rid, ver, _fn, desc in LEADS_RULES:
+            tree.insert("", "end", iid=rid, values=(
+                f"v{ver}", RULE_LABELS.get(rid, rid), desc,
+                "启用" if self.db.get_rule_enabled(rid) else "停用"))
+
+        def toggle():
+            sel = tree.selection()
+            if not sel:
+                return
+            rid = sel[0]
+            new = not self.db.get_rule_enabled(rid)
+            self.db.set_rule_enabled(rid, new, utcnow_iso())
+            tree.set(rid, "state", "启用" if new else "停用")
+
+        btns = ttk.Frame(win)
+        btns.pack(pady=(0, 10))
+        ttk.Button(btns, text="启用/停用所选规则", command=toggle).pack(
+            side="left", padx=3)
+        ttk.Button(btns, text="关闭", command=win.destroy).pack(side="left", padx=3)
 
     # ---------------------------------------------------------------- 事件详情
     def _show_event_detail(self, tree: ttk.Treeview | None = None) -> None:
