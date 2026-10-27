@@ -67,6 +67,21 @@ def fmt_time_local(iso: str | None) -> str:
         return iso
 
 
+def read_text_head(abs_root: str, rel_path: str, limit: int = 256 * 1024) -> str | None:
+    """只读读取项目内文本文件头部。二进制（首 1KB 含 \\0）、超限或读取失败返回 None。"""
+    try:
+        full = extended_path(os.path.join(abs_root, rel_path.replace("/", os.sep)))
+        if os.path.getsize(full) > limit:
+            return None
+        with open(full, "rb") as f:
+            if b"\0" in f.read(1024):
+                return None
+            f.seek(0)
+            return f.read(limit).decode("utf-8", errors="replace")
+    except OSError:
+        return None
+
+
 def default_db_path() -> Path:
     """默认数据库位置：%LOCALAPPDATA%/TimeArchaeologist/time_arch.db。"""
     env = os.environ.get("TIME_ARCH_DB")

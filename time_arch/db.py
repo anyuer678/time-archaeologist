@@ -18,7 +18,7 @@ from typing import Iterator
 
 from .util import utcnow_iso
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _BASE_STATEMENTS = [
     """CREATE TABLE IF NOT EXISTS projects (
@@ -138,6 +138,21 @@ _MIGRATIONS: dict[int, list[str]] = {
 )""",
         "CREATE INDEX IF NOT EXISTS idx_relations_snap ON relations(snapshot_id)",
         "CREATE INDEX IF NOT EXISTS idx_relations_dst ON relations(snapshot_id, dst_path)",
+    ],
+    # v3（2.0 第三步）：实验复现检查结果。按 (project, snapshot, target) 幂等替换。
+    3: [
+        """CREATE TABLE IF NOT EXISTS repro_checks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    snapshot_id INTEGER NOT NULL,
+    artifact_id INTEGER REFERENCES artifacts(id) ON DELETE SET NULL,
+    target_path TEXT NOT NULL,
+    level TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    checks TEXT NOT NULL DEFAULT '[]',
+    generated_at TEXT NOT NULL,
+    UNIQUE(project_id, snapshot_id, target_path))""",
+        "CREATE INDEX IF NOT EXISTS idx_repro_project ON repro_checks(project_id)",
     ],
 }
 
@@ -608,3 +623,36 @@ class Database:
         sql += " ORDER BY confidence DESC, id LIMIT ?"
         args.append(limit)
         return self.query(sql, args)
+
+    # ---------- 复现检查 ----------
+    def save_repro_check(self, project_id: int, snapshot_id: int, target_path: str,
+                         level: str, score: int, checks: str, artifact_id: int | None,
+                         now: str) -> int:
+        """保存（或整行替换）一条复现检查结果，按 (project, snapshot, target) 幂等。"""
+        with self._session(write=True) as conn:
+            conn.execute(
+                "INSERT INTO repro_checks(project_id, snapshot_id, artifact_id, target_path, "
+                "level, score, checks, generated_at) VALUES(?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(project_id, snapshot_id, target_path) DO UPDATE SET "
+                "artifact_id=excluded.artifact_id, level=excluded.level, score=excluded.score, "
+                "checks=excluded.checks, generated_at=excluded.generated_at",
+                (project_id, snapshot_id, artifact_id, target_path, level, score, checks, now))
+            row = conn.execute(
+                "SELECT id FROM repro_checks WHERE project_id=? AND snapshot_id=? AND target_path=?",
+                (project_id, snapshot_id, target_path)).fetchone()
+            return row[0]
+
+    def list_repro_checks(self, project_id: int, snapshot_id: int | None = None,
+                          limit: int = 200) -> list[sqlite3.Row]:
+        sql = "SELECT * FROM repro_checks WHERE project_id=?"
+        args: list = [project_id]
+        if snapshot_id:
+            sql += " AND snapshot_id=?"
+            args.append(snapshot_id)
+        sql += " ORDER BY generated_at DESC, id LIMIT ?"
+        args.append(limit)
+        return self.query(sql, args)
+
+    def get_repro_check(self, check_id: int) -> sqlite3.Row | None:
+        rows = self.query("SELECT * FROM repro_checks WHERE id=?", (check_id,))
+        return rows[0] if rows else None

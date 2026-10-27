@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from time_arch.db import Database
+from time_arch.db import Database, SCHEMA_VERSION
 from time_arch.dossier import (ARTIFACT_KINDS, analyze_artifacts, dossier_view,
                                run_dossier_analysis)
 from time_arch.graph import run_relation_analysis, trace_relations
@@ -100,7 +100,7 @@ class TestMigrationCompat(unittest.TestCase):
         conn.close()
 
         db = Database(db_path)  # 打开即迁移
-        self.assertEqual(db.query("PRAGMA user_version")[0][0], 2)
+        self.assertEqual(db.query("PRAGMA user_version")[0][0], SCHEMA_VERSION)
         old = db.get_project(1)
         self.assertIsNotNone(old)
         self.assertEqual(old["name"], "旧项目")
@@ -111,7 +111,7 @@ class TestMigrationCompat(unittest.TestCase):
         self.assertEqual(db.query("PRAGMA integrity_check")[0][0], "ok")
         # 幂等：重开不重复迁移、不报错
         db2 = Database(db_path)
-        self.assertEqual(db2.query("PRAGMA user_version")[0][0], 2)
+        self.assertEqual(db2.query("PRAGMA user_version")[0][0], SCHEMA_VERSION)
         self.assertIsNotNone(db2.get_project(1))
 
 

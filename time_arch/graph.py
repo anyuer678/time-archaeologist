@@ -12,7 +12,7 @@ import os
 import re
 
 from .db import Database
-from .util import utcnow_iso
+from .util import read_text_head, utcnow_iso
 
 RELATION_LABELS = {
     "test_module": "测试↔被测模块",
@@ -41,21 +41,7 @@ def _stem(path: str) -> str:
 
 
 def _read_text_head(abs_root: str, rel_path: str) -> str | None:
-    """只读读取文本文件头部；二进制/超限/失败返回 None。不执行任何内容。"""
-    try:
-        from .util import extended_path
-        full = extended_path(os.path.join(abs_root, rel_path.replace("/", os.sep)))
-        if os.path.getsize(full) > TEXT_READ_LIMIT:
-            return None
-        with open(full, "rb") as f:
-            head = f.read(1024)
-            if b"\0" in head:
-                return None
-            f.seek(0)
-            data = f.read(TEXT_READ_LIMIT)
-        return data.decode("utf-8", errors="replace")
-    except OSError:
-        return None
+    return read_text_head(abs_root, rel_path, TEXT_READ_LIMIT)
 
 
 # ---------------------------------------------------------------- 规则实现
