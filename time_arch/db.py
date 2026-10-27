@@ -18,7 +18,7 @@ from typing import Iterator
 
 from .util import utcnow_iso
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _BASE_STATEMENTS = [
     """CREATE TABLE IF NOT EXISTS projects (
@@ -203,6 +203,28 @@ _MIGRATIONS: dict[int, list[str]] = {
     created_at TEXT NOT NULL,
     UNIQUE(project_id, label, start_snapshot))""",
         "CREATE INDEX IF NOT EXISTS idx_phases_project ON phases(project_id)",
+    ],
+    # v6（2.0 第六步）：调查任务。由线索派生，按 (project, task_key, target_key) 幂等；
+    # 只有用户确认才写 done（completed_at），生成器永远只写 open。
+    6: [
+        """CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    lead_id INTEGER REFERENCES leads(id) ON DELETE SET NULL,
+    task_key TEXT NOT NULL DEFAULT '',
+    target_key TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL,
+    why TEXT NOT NULL DEFAULT '',
+    evidence TEXT NOT NULL DEFAULT '[]',
+    manual_steps TEXT NOT NULL DEFAULT '[]',
+    done_criteria TEXT NOT NULL DEFAULT '',
+    verify_command TEXT NOT NULL DEFAULT '',
+    verify_desc TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open',
+    origin TEXT NOT NULL DEFAULT 'machine',
+    created_at TEXT NOT NULL,
+    completed_at TEXT)""",
+        "CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)",
     ],
 }
 
@@ -764,6 +786,69 @@ class Database:
                 "INSERT INTO rule_config(rule_id, enabled, updated_at) VALUES(?,?,?) "
                 "ON CONFLICT(rule_id) DO UPDATE SET enabled=excluded.enabled, "
                 "updated_at=excluded.updated_at", (rule_id, int(enabled), now))
+
+    # ---------- 调查任务（第六步） ----------
+    def upsert_task(self, project_id: int, lead_id: int | None, task_key: str,
+                    target_key: str, title: str, why: str, evidence_json: str,
+                    manual_steps_json: str, done_criteria: str, verify_command: str,
+                    verify_desc: str, now: str) -> tuple[int, bool]:
+        """按 (project, task_key, target_key) 幂等保存机器任务；已存在时只更新内容，
+        保留人工状态（status/completed_at）。调用方（生成器）永远不写 done。"""
+        with self._session(write=True) as conn:
+            row = conn.execute(
+                "SELECT id FROM tasks WHERE project_id=? AND task_key=? AND target_key=?",
+                (project_id, task_key, target_key)).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE tasks SET lead_id=?, title=?, why=?, evidence=?, "
+                    "manual_steps=?, done_criteria=?, verify_command=?, verify_desc=? "
+                    "WHERE id=?",
+                    (lead_id, title, why, evidence_json, manual_steps_json,
+                     done_criteria, verify_command, verify_desc, row[0]))
+                return row[0], False
+            cur = conn.execute(
+                "INSERT INTO tasks(project_id, lead_id, task_key, target_key, title, "
+                "why, evidence, manual_steps, done_criteria, verify_command, "
+                "verify_desc, status, origin, created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,'open','machine',?)",
+                (project_id, lead_id, task_key, target_key, title, why, evidence_json,
+                 manual_steps_json, done_criteria, verify_command, verify_desc, now))
+            return cur.lastrowid, True
+
+    def add_user_task(self, project_id: int, title: str, why: str, now: str,
+                      manual_steps: list[str] | None = None,
+                      done_criteria: str = "") -> int:
+        """用户手动添加任务（不关联线索；origin=user，与机器任务明确区分）。"""
+        with self._session(write=True) as conn:
+            cur = conn.execute(
+                "INSERT INTO tasks(project_id, lead_id, task_key, target_key, title, "
+                "why, evidence, manual_steps, done_criteria, verify_command, "
+                "verify_desc, status, origin, created_at) "
+                "VALUES(?,NULL,'user','',?,?, '[]', ?, ?, '', '', 'open','user',?)",
+                (project_id, title, why, json.dumps(manual_steps or [],
+                                                    ensure_ascii=False),
+                 done_criteria, now))
+            return cur.lastrowid
+
+    def list_tasks(self, project_id: int, status: str | None = None,
+                   limit: int = 500) -> list[sqlite3.Row]:
+        sql = "SELECT * FROM tasks WHERE project_id=?"
+        args: list = [project_id]
+        if status:
+            sql += " AND status=?"
+            args.append(status)
+        sql += " ORDER BY id LIMIT ?"
+        args.append(limit)
+        return self.query(sql, args)
+
+    def set_task_status(self, task_id: int, status: str, now: str) -> None:
+        """任务状态只应由用户操作调用（UI 按钮）；生成/更新任务永远不会写 done。"""
+        if status not in ("open", "done", "dismissed"):
+            raise ValueError(f"未知任务状态: {status}")
+        with self._session(write=True) as conn:
+            conn.execute(
+                "UPDATE tasks SET status=?, completed_at=? WHERE id=?",
+                (status, now if status == "done" else None, task_id))
 
     # ---------- 里程碑与阶段（第五步） ----------
     def upsert_milestone(self, project_id: int, snapshot_id: int | None, title: str,

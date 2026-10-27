@@ -23,6 +23,8 @@ from ..phases import (MILESTONE_STATUS, export_timeline_markdown,
                       persist_milestone_suggestions, suggest_phases)
 from ..reports import export_report
 from ..scanner import ScanProgress, ScanResult, ScanService
+from ..tasks import (TASK_STATUS, export_tasks_markdown, generate_tasks,
+                     task_view)
 from ..util import fmt_size, fmt_time_local, utcnow_iso
 from .theme import ACCENT, BG, FG, FG_DIM, PANEL, apply_theme
 
@@ -121,6 +123,7 @@ class App:
         self._build_recent_tab()
         self._build_findings_tab()
         self._build_leads_tab()
+        self._build_task_tab()
         self._build_graph_tab()
         self._build_phase_tab()
         self._build_compare_tab()
@@ -323,6 +326,56 @@ class App:
         ttk.Label(tab, text="线索是「值得查看的问题」，不是结论。双击查看证据、可能的解释与"
                             "下一步建议；重跑分析会更新线索内容但保留人工状态。",
                   style="Dim.TLabel").pack(anchor="w", pady=(2, 0))
+
+    def _build_task_tab(self) -> None:
+        tab = ttk.Frame(self.tabs, padding=10)
+        self.tabs.add(tab, text="  调查任务  ")
+        bar = ttk.Frame(tab)
+        bar.pack(fill="x", pady=(0, 4))
+        ttk.Button(bar, text="从最新线索生成任务", style="Accent.TButton",
+                   command=self.on_generate_tasks).pack(side="left")
+        ttk.Button(bar, text="手动添加任务…",
+                   command=self.on_add_task).pack(side="left", padx=(6, 0))
+        ttk.Button(bar, text="导出任务清单…",
+                   command=self.on_export_tasks).pack(side="left", padx=(6, 12))
+        ttk.Label(bar, text="状态").pack(side="left")
+        self.tk_status = ttk.Combobox(
+            bar, width=14, state="readonly",
+            values=["全部状态"] + [TASK_STATUS[s] for s in
+                                   ("open", "done", "dismissed")])
+        self.tk_status.current(0)
+        self.tk_status.pack(side="left", padx=(4, 10))
+        ttk.Button(bar, text="筛选", command=self.refresh_tasks).pack(side="left")
+
+        self.tk_info = tk.StringVar(value="任务由真实调查线索生成：每条包含为什么调查、已有证据、"
+                                          "人工操作、完成条件与只读验证建议。")
+        ttk.Label(tab, textvariable=self.tk_info, style="Dim.TLabel", wraplength=900,
+                  justify="left").pack(anchor="w", pady=(0, 4))
+        cols = ("status", "title", "rule", "target")
+        self.tk_tree = ttk.Treeview(tab, columns=cols, show="headings")
+        for col, text, w, anchor in (
+                ("status", "状态", 110, "w"), ("title", "任务", 430, "w"),
+                ("rule", "来源线索", 130, "w"), ("target", "目标", 190, "w")):
+            self.tk_tree.heading(col, text=text)
+            self.tk_tree.column(col, width=w, anchor=anchor,
+                                stretch=(col in ("title", "target")))
+        self.tk_tree.pack(fill="both", expand=True)
+        self.tk_tree.bind("<Double-1>", lambda e: self._show_task_detail())
+        self.tk_tree.tag_configure("done", foreground="#9fbf7f")
+        self.tk_tree.tag_configure("dismissed", foreground=FG_DIM)
+        row = ttk.Frame(tab)
+        row.pack(fill="x", pady=(4, 0))
+        ttk.Button(row, text="确认完成所选任务", command=self.on_complete_task
+                   ).pack(side="left")
+        ttk.Button(row, text="重新打开", command=lambda: self._set_task("open")
+                   ).pack(side="left", padx=(6, 0))
+        ttk.Button(row, text="忽略所选", command=lambda: self._set_task("dismissed")
+                   ).pack(side="left", padx=(6, 0))
+        ttk.Label(tab, text="任务不是普通待办清单：只能由真实线索产生并关联证据。"
+                            "「已完成」仅表示你本人完成调查并确认结论——系统不执行操作、"
+                            "不伪造结果；重跑生成会更新任务内容但保留人工状态。",
+                  style="Dim.TLabel", wraplength=900, justify="left"
+                  ).pack(anchor="w", pady=(2, 0))
 
     def _build_graph_tab(self) -> None:
         tab = ttk.Frame(self.tabs, padding=10)
@@ -636,6 +689,7 @@ class App:
         self.refresh_recent()
         self.refresh_findings()
         self.refresh_leads()
+        self.refresh_tasks()
         self.refresh_graph()
         self.refresh_phases()
         self.refresh_compare_choices()
@@ -914,6 +968,143 @@ class App:
         self.db.set_lead_status(lead_id, status)
         win.destroy()
         self.refresh_leads()
+
+    # ---------------------------------------------------------------- 调查任务
+    def refresh_tasks(self) -> None:
+        for t in self.tk_tree.get_children():
+            self.tk_tree.delete(t)
+        pid = self.selected_project_id
+        if pid is None:
+            self.tk_info.set("（左侧选择项目后，可从调查线索生成任务清单）")
+            return
+        status_map = {v: k for k, v in TASK_STATUS.items()}
+        rows = self.db.query(
+            "SELECT t.*, l.rule_id AS l_rule FROM tasks t "
+            "LEFT JOIN leads l ON t.lead_id=l.id WHERE t.project_id=?"
+            + (" AND t.status=?" if self.tk_status.get() != "全部状态" else "")
+            + " ORDER BY t.id LIMIT 1000",
+            [pid] + ([status_map[self.tk_status.get()]]
+                     if self.tk_status.get() != "全部状态" else []))
+        open_n = sum(1 for r in rows if r["status"] == "open")
+        self.tk_info.set(
+            f"共 {len(rows)} 项任务（当前筛选），待处理 {open_n} 项。"
+            "双击查看为什么调查 / 已有证据 / 人工操作 / 完成条件 / 验证建议。")
+        for r in rows:
+            tags = (r["status"],) if r["status"] != "open" else ()
+            origin = "人工添加" if r["origin"] == "user" else \
+                RULE_LABELS.get(r["l_rule"], r["l_rule"] or "")
+            self.tk_tree.insert("", "end", iid=str(r["id"]), tags=tags, values=(
+                TASK_STATUS.get(r["status"], r["status"]),
+                r["title"], origin, r["target_key"] or "—"))
+
+    def on_generate_tasks(self) -> None:
+        pid = self.selected_project_id
+        if pid is None:
+            messagebox.showinfo("提示", "请先在左侧选择一个项目。", parent=self.root)
+            return
+        r = generate_tasks(self.db, pid)
+        self.tk_info.set(
+            f"任务生成完成（快照 #{r['snapshot_id']}）：新建 {r['created']} 项，"
+            f"更新 {r['updated']} 项，当前共 {r['total']} 项。"
+            "已忽略的线索不会生成任务；任务内容更新时保留人工状态。")
+        self.refresh_tasks()
+
+    def _selected_task(self) -> dict | None:
+        sel = self.tk_tree.selection()
+        if not sel:
+            messagebox.showinfo("提示", "请先在列表中选择一项任务。", parent=self.root)
+            return None
+        return task_view(self.db, int(sel[0]))
+
+    def on_complete_task(self) -> None:
+        t = self._selected_task()
+        if not t:
+            return
+        if not messagebox.askyesno(
+                "确认完成",
+                f"「已完成」表示你本人已完成该调查并确认结论，系统不会替你验证。\n\n"
+                f"任务：{t['title']}\n\n确认标记为已完成？", parent=self.root):
+            return
+        self.db.set_task_status(t["id"], "done", utcnow_iso())
+        self.refresh_tasks()
+
+    def _set_task(self, status: str) -> None:
+        t = self._selected_task()
+        if not t:
+            return
+        self.db.set_task_status(t["id"], status, utcnow_iso())
+        self.refresh_tasks()
+
+    def on_add_task(self) -> None:
+        pid = self.selected_project_id
+        if pid is None:
+            messagebox.showinfo("提示", "请先在左侧选择一个项目。", parent=self.root)
+            return
+        title = simpledialog.askstring("手动添加任务", "任务描述（必填）：", parent=self.root)
+        if not title or not title.strip():
+            return
+        why = simpledialog.askstring("手动添加任务", "为什么需要调查（可选）：", parent=self.root)
+        self.db.add_user_task(pid, title.strip(), (why or "").strip(), utcnow_iso())
+        self.refresh_tasks()
+
+    def on_export_tasks(self) -> None:
+        pid = self.selected_project_id
+        if pid is None:
+            messagebox.showinfo("提示", "请先在左侧选择一个项目。", parent=self.root)
+            return
+        path = filedialog.asksaveasfilename(
+            defaultextension=".md", filetypes=[("Markdown", "*.md")],
+            initialfile="调查任务清单.md", parent=self.root)
+        if not path:
+            return
+        info = export_tasks_markdown(self.db, pid, path)
+        self.tk_info.set(f"已导出 {info['tasks']} 项任务（待处理 {info['open']} 项）→ {path}")
+
+    def _show_task_detail(self) -> None:
+        t = self._selected_task()
+        if not t:
+            return
+        lines = [
+            f"任务：{t['title']}",
+            f"状态：{t['status_label']}"
+            + (f" · 人工确认完成于 {fmt_time_local(t['completed_at'])}"
+               if t["status"] == "done" and t["completed_at"] else "")
+            + (f" · 来源：人工添加" if t["origin"] == "user" else " · 来源：线索生成"),
+            f"目标：{t['target_key'] or '—'} · 创建于 {fmt_time_local(t['created_at'])}",
+            "", "为什么需要调查：", f"  {t['why']}", "", "当前已有的证据：",
+        ]
+        ev = t["evidence_list"]
+        lines += [f"  - {e}" for e in ev] if ev else ["  （无证据记录）"]
+        lines += ["", "需要人工执行的操作："]
+        steps = t["manual_steps_list"]
+        lines += [f"  {i}. {s}" for i, s in enumerate(steps, 1)] if steps \
+            else ["  （由人工自行决定）"]
+        lines += ["", f"完成条件：{t['done_criteria'] or '（由人工判断）'}"]
+        if t["verify_command"]:
+            lines += [f"验证命令（只读建议，请自行确认后再使用）：{t['verify_command']}"]
+        if t["verify_desc"]:
+            lines += [f"  说明：{t['verify_desc']}"]
+        if t["lead_id"]:
+            lines += ["", f"关联线索：{t['lead_title']}（{t['lead_rule_label']}）"]
+            if t["lead_current"] is False:
+                lines.append("  注：该线索在最新扫描中未再触发——问题可能已变化，"
+                             "结论以人工调查为准。")
+        win = tk.Toplevel(self.root)
+        win.title(f"任务 #{t['id']}")
+        win.geometry("760x560")
+        win.configure(bg=PANEL)
+        txt = tk.Text(win, bg=PANEL, fg=FG, insertbackground=FG, relief="flat",
+                      font=("Consolas", 10), wrap="word", padx=12, pady=10)
+        txt.insert("1.0", "\n".join(lines))
+        txt.configure(state="disabled")
+        txt.pack(fill="both", expand=True)
+        btns = ttk.Frame(win)
+        btns.pack(pady=6)
+        if t["status"] != "done":
+            ttk.Button(btns, text="确认完成（人工确认）", command=lambda: (
+                self.db.set_task_status(t["id"], "done", utcnow_iso()),
+                win.destroy(), self.refresh_tasks())).pack(side="left", padx=3)
+        ttk.Button(btns, text="关闭", command=win.destroy).pack(side="left", padx=3)
 
     def _show_rules_dialog(self) -> None:
         win = tk.Toplevel(self.root)
