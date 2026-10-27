@@ -9,13 +9,18 @@ import json
 import queue
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from .. import APP_NAME_CN, __version__
 from ..analyze import KIND_LABELS
 from ..classify import CATEGORY_LABELS
 from ..db import Database
+from ..graph import (RELATION_LABELS, RULES as GRAPH_RULES,
+                     RULE_LABELS as GRAPH_RULE_LABELS,
+                     run_relation_analysis, trace_relations)
 from ..investigate import LEADS_RULES, RULE_LABELS, lead_view, run_lead_analysis
+from ..phases import (MILESTONE_STATUS, export_timeline_markdown,
+                      persist_milestone_suggestions, suggest_phases)
 from ..reports import export_report
 from ..scanner import ScanProgress, ScanResult, ScanService
 from ..util import fmt_size, fmt_time_local, utcnow_iso
@@ -42,6 +47,14 @@ class App:
         self.tl_page = 0
         self._snap_map: dict[int, dict] = {}
         self._leads_running = False
+        self._relations_running = False
+        self._phases_running = False
+        self._graph_files: list[dict] = []
+        self._graph_snap_id: int | None = None
+        self._graph_snap_map: dict[str, int] = {}
+        self._phase_suggestions: list[dict] = []
+        self._phase_suggestions_pid: int | None = None
+        self._trace_edges: list[dict] = []
 
         root.title(f"{APP_NAME_CN} Time Archaeologist v{__version__}")
         root.geometry("1220x780")
@@ -108,6 +121,8 @@ class App:
         self._build_recent_tab()
         self._build_findings_tab()
         self._build_leads_tab()
+        self._build_graph_tab()
+        self._build_phase_tab()
         self._build_compare_tab()
 
         status = ttk.Frame(self.root)
@@ -309,6 +324,143 @@ class App:
                             "下一步建议；重跑分析会更新线索内容但保留人工状态。",
                   style="Dim.TLabel").pack(anchor="w", pady=(2, 0))
 
+    def _build_graph_tab(self) -> None:
+        tab = ttk.Frame(self.tabs, padding=10)
+        self.tabs.add(tab, text="  演化图谱  ")
+        bar = ttk.Frame(tab)
+        bar.pack(fill="x", pady=(0, 4))
+        ttk.Button(bar, text="分析关系（最新快照）", style="Accent.TButton",
+                   command=self.on_analyze_relations).pack(side="left")
+        ttk.Label(bar, text="快照").pack(side="left", padx=(12, 2))
+        self.g_snap = ttk.Combobox(bar, width=26, state="readonly")
+        self.g_snap.pack(side="left")
+        ttk.Label(bar, text="追踪方向").pack(side="left", padx=(10, 2))
+        self.g_dir = ttk.Combobox(bar, width=8, state="readonly",
+                                  values=["上游", "下游", "双向"])
+        self.g_dir.current(2)
+        self.g_dir.pack(side="left")
+        ttk.Label(bar, text="筛选(路径包含)").pack(side="left", padx=(10, 2))
+        self.g_filter = ttk.Entry(bar, width=16)
+        self.g_filter.pack(side="left")
+        self.g_filter.bind("<Return>", lambda e: self.refresh_graph())
+        ttk.Button(bar, text="刷新文件", command=self.refresh_graph).pack(side="left", padx=(6, 0))
+
+        self.g_info = tk.StringVar(
+            value="关系由确定性规则生成（测试约定/内容引用/同次运行等），均带来源与置信度；"
+                  "低置信度（≤0.7）为推测。双击左侧文件开始追踪。")
+        ttk.Label(tab, textvariable=self.g_info, style="Dim.TLabel", wraplength=900,
+                  justify="left").pack(anchor="w", pady=(0, 4))
+
+        panes = ttk.PanedWindow(tab, orient="horizontal")
+        panes.pack(fill="both", expand=True)
+        left, right = ttk.Frame(panes), ttk.Frame(panes)
+        panes.add(left, weight=1)
+        panes.add(right, weight=2)
+
+        ttk.Label(left, text="文件（双击 = 以该文件为起点追踪）",
+                  style="Accent.TLabel").pack(anchor="w")
+        cols = ("file", "cat")
+        self.g_files = ttk.Treeview(left, columns=cols, show="headings")
+        for col, text, w, anchor in (("file", "文件", 300, "w"), ("cat", "类别", 70, "w")):
+            self.g_files.heading(col, text=text)
+            self.g_files.column(col, width=w, anchor=anchor, stretch=(col == "file"))
+        self.g_files.pack(fill="both", expand=True, pady=(2, 4))
+        self.g_files.bind("<Double-1>", lambda e: self.on_trace())
+
+        ttk.Label(right, text="追踪结果（节点 + 关系边）", style="Accent.TLabel").pack(anchor="w")
+        cols = ("kind", "main", "detail", "conf")
+        self.g_trace = ttk.Treeview(right, columns=cols, show="headings")
+        for col, text, w, anchor in (
+                ("kind", "类型", 56, "w"), ("main", "路径 / 关系", 300, "w"),
+                ("detail", "说明", 250, "w"), ("conf", "置信度", 60, "w")):
+            self.g_trace.heading(col, text=text)
+            self.g_trace.column(col, width=w, anchor=anchor, stretch=(col == "main"))
+        self.g_trace.pack(fill="both", expand=True, pady=(2, 4))
+        self.g_trace.bind("<Double-1>", lambda e: self._show_edge_basis())
+        self.g_trace.tag_configure("root", foreground="#9fbf7f")
+        self.g_trace.tag_configure("lowconf", foreground="#b08d57")
+        ttk.Label(right, text="双击「关系」行查看判断依据与规则来源。"
+                             "大型项目请先用筛选缩小文件范围，再逐点追踪。",
+                  style="Dim.TLabel").pack(anchor="w")
+
+    def _build_phase_tab(self) -> None:
+        tab = ttk.Frame(self.tabs, padding=10)
+        self.tabs.add(tab, text="  演化阶段  ")
+        bar = ttk.Frame(tab)
+        bar.pack(fill="x", pady=(0, 4))
+        ttk.Button(bar, text="生成阶段建议（最新快照）", style="Accent.TButton",
+                   command=self.on_suggest_phases).pack(side="left")
+        ttk.Button(bar, text="导出时间线 Markdown…", command=self.on_export_timeline
+                   ).pack(side="left", padx=(6, 0))
+        self.ph_info = tk.StringVar(
+            value="阶段是可选分析模型，不强行套用；机器建议不入库存档，人工确认后才保存。"
+                  "片段边界 = 快照号（观察时点），不是日历时间，更不代表工作时长。")
+        ttk.Label(tab, textvariable=self.ph_info, style="Dim.TLabel", wraplength=900,
+                  justify="left").pack(anchor="w", pady=(0, 4))
+
+        panes = ttk.PanedWindow(tab, orient="horizontal")
+        panes.pack(fill="both", expand=True)
+        left, right = ttk.Frame(panes), ttk.Frame(panes)
+        panes.add(left, weight=1)
+        panes.add(right, weight=1)
+
+        ttk.Label(left, text="机器阶段建议（双击片段查看阶段间变化）",
+                  style="Accent.TLabel").pack(anchor="w")
+        cols = ("phase", "seg", "conf", "ev")
+        self.ph_suggest = ttk.Treeview(left, columns=cols, show="headings", height=8)
+        for col, text, w, anchor in (
+                ("phase", "阶段", 80, "w"), ("seg", "快照区间", 110, "w"),
+                ("conf", "置信度", 56, "w"), ("ev", "证据数", 56, "e")):
+            self.ph_suggest.heading(col, text=text)
+            self.ph_suggest.column(col, width=w, anchor=anchor)
+        self.ph_suggest.pack(fill="both", expand=True, pady=(2, 4))
+        self.ph_suggest.bind("<Double-1>", lambda e: self._show_segment_changes())
+        self.ph_suggest.tag_configure("high", foreground="#9fbf7f")
+        ttk.Button(left, text="确认所选片段为人工阶段", command=self.on_confirm_segment
+                   ).pack(fill="x")
+        ttk.Label(left, text="人工确认 / 自定义阶段", style="Accent.TLabel"
+                  ).pack(anchor="w", pady=(8, 0))
+        cols = ("label", "seg", "src")
+        self.ph_user = ttk.Treeview(left, columns=cols, show="headings", height=6)
+        for col, text, w, anchor in (
+                ("label", "名称", 130, "w"), ("seg", "快照区间", 110, "w"),
+                ("src", "来源", 110, "w")):
+            self.ph_user.heading(col, text=text)
+            self.ph_user.column(col, width=w, anchor=anchor)
+        self.ph_user.pack(fill="both", expand=True, pady=(2, 4))
+        ph_btns = ttk.Frame(left)
+        ph_btns.pack(fill="x")
+        ttk.Button(ph_btns, text="添加自定义阶段…", command=self.on_add_phase
+                   ).pack(side="left", padx=(0, 4))
+        ttk.Button(ph_btns, text="删除所选", command=self.on_remove_phase).pack(side="left")
+
+        ttk.Label(right, text="里程碑（机器建议与人工添加分开记录，双击查看证据）",
+                  style="Accent.TLabel").pack(anchor="w")
+        cols = ("origin", "title", "snap")
+        self.ph_miles = ttk.Treeview(right, columns=cols, show="headings", height=14)
+        for col, text, w, anchor in (
+                ("origin", "来源·状态", 110, "w"), ("title", "里程碑", 280, "w"),
+                ("snap", "快照", 60, "e")):
+            self.ph_miles.heading(col, text=text)
+            self.ph_miles.column(col, width=w, anchor=anchor, stretch=(col == "title"))
+        self.ph_miles.pack(fill="both", expand=True, pady=(2, 4))
+        self.ph_miles.bind("<Double-1>", lambda e: self._show_milestone_detail())
+        self.ph_miles.tag_configure("confirmed", foreground="#9fbf7f")
+        self.ph_miles.tag_configure("user", foreground="#d8b35a")
+        ms_btns = ttk.Frame(right)
+        ms_btns.pack(fill="x")
+        ttk.Button(ms_btns, text="确认所选", command=self.on_confirm_milestone
+                   ).pack(side="left", padx=(0, 4))
+        ttk.Button(ms_btns, text="添加里程碑…", command=self.on_add_milestone
+                   ).pack(side="left", padx=(0, 4))
+        ttk.Button(ms_btns, text="删除所选", command=self.on_remove_milestone).pack(side="left")
+        self.ph_changes = tk.StringVar(value="")
+        ttk.Label(right, textvariable=self.ph_changes, style="Dim.TLabel",
+                  wraplength=560, justify="left").pack(anchor="w", pady=(6, 0))
+        ttk.Label(tab, text="文件系统记录只能还原部分历史，无法完整还原真实工作过程；"
+                            "文件修改时间不代表工作时长，发布物出现不代表发布成功。",
+                  style="Dim.TLabel").pack(anchor="w", pady=(4, 0))
+
     def _build_compare_tab(self) -> None:
         tab = ttk.Frame(self.tabs, padding=10)
         self.tabs.add(tab, text="  快照对比  ")
@@ -446,6 +598,14 @@ class App:
                     self._handle_leads_done(payload)
                 elif kind == "leads_error":
                     self._handle_leads_error(payload)
+                elif kind == "relations_done":
+                    self._handle_relations_done(payload)
+                elif kind == "relations_error":
+                    self._handle_relations_error(payload)
+                elif kind == "phases_done":
+                    self._handle_phases_done(payload)
+                elif kind == "phases_error":
+                    self._handle_phases_error(payload)
         except queue.Empty:
             pass
         self.root.after(120, self._poll_scan_queue)
@@ -476,6 +636,8 @@ class App:
         self.refresh_recent()
         self.refresh_findings()
         self.refresh_leads()
+        self.refresh_graph()
+        self.refresh_phases()
         self.refresh_compare_choices()
 
     def refresh_overview(self) -> None:
@@ -789,6 +951,382 @@ class App:
         ttk.Button(btns, text="启用/停用所选规则", command=toggle).pack(
             side="left", padx=3)
         ttk.Button(btns, text="关闭", command=win.destroy).pack(side="left", padx=3)
+
+    # ---------------------------------------------------------------- 演化图谱
+    def _graph_norm(self, p: str) -> str:
+        return str(p).replace("\\", "/")
+
+    def refresh_graph(self) -> None:
+        for t in self.g_files.get_children():
+            self.g_files.delete(t)
+        for t in self.g_trace.get_children():
+            self.g_trace.delete(t)
+        pid = self.selected_project_id
+        self._graph_files = []
+        self._trace_edges = []
+        if pid is None:
+            self.g_info.set("（左侧选择项目后查看文件关系图谱）")
+            return
+        snaps = self.db.list_snapshots(pid)
+        self._graph_snap_map = {
+            f"#{s['id']}  {fmt_time_local(s['created_at'])}": s["id"] for s in snaps}
+        self.g_snap.configure(values=list(self._graph_snap_map))
+        if snaps:
+            self.g_snap.current(0)
+        snap_id = self._graph_snap_map.get(self.g_snap.get())
+        self._graph_snap_id = snap_id
+        if snap_id is None:
+            self.g_info.set("（该项目还没有完成的扫描快照，请先执行扫描）")
+            return
+        rows = self.db.query(
+            "SELECT rel_path, category, read_error FROM file_records WHERE snapshot_id=? "
+            "ORDER BY rel_path", (snap_id,))
+        files = [{"rel_path": self._graph_norm(r["rel_path"]), "category": r["category"]}
+                 for r in rows if not r["read_error"]]
+        flt = self.g_filter.get().strip().lower()
+        if flt:
+            files = [f for f in files if flt in f["rel_path"].lower()]
+        self._graph_files = files[:800]
+        for f in self._graph_files:
+            self.g_files.insert("", "end", iid=f["rel_path"], values=(
+                f["rel_path"], CATEGORY_LABELS.get(f["category"], f["category"])))
+        total = len(files)
+        shown = len(self._graph_files)
+        note = "（筛选后）" if flt else ""
+        if total > shown:
+            note += f"仅显示前 {shown} 个，请用筛选缩小范围"
+        self.g_info.set(f"快照 #{snap_id}：{total} 个可读文件{note}。"
+                        "先「分析关系」，再双击文件追踪。")
+
+    def on_analyze_relations(self) -> None:
+        if self._relations_running:
+            messagebox.showinfo("提示", "关系分析正在进行。", parent=self.root)
+            return
+        pid = self.selected_project_id
+        if pid is None:
+            messagebox.showinfo("提示", "请先在左侧选择一个项目。", parent=self.root)
+            return
+        latest = self.db.latest_snapshot(pid)
+        if latest is None:
+            messagebox.showinfo("提示", "该项目还没有完成的扫描快照，请先执行扫描。",
+                                parent=self.root)
+            return
+        self._relations_running = True
+        self.g_info.set(f"关系分析中…（快照 #{latest['id']}，只读分析已扫描记录）")
+
+        def work():
+            try:
+                result = run_relation_analysis(self.db, pid, latest["id"])
+            except Exception as e:  # 后台线程异常需回传主线程，否则界面状态会卡住
+                self.scan_queue.put(("relations_error", str(e)))
+            else:
+                self.scan_queue.put(("relations_done", result))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _handle_relations_done(self, result: dict) -> None:
+        self._relations_running = False
+        by_rule = "，".join(f"{GRAPH_RULE_LABELS.get(rid, rid)} {n} 条" for rid, n in
+                            self._relation_counts(result["snapshot_id"]).items())
+        self.g_info.set(f"关系分析完成（快照 #{result['snapshot_id']}）：共 {result['edges']} 条边"
+                        + (f" — {by_rule}" if by_rule else ""))
+        self.refresh_graph()
+
+    def _relation_counts(self, snapshot_id: int) -> dict:
+        rows = self.db.query(
+            "SELECT source, COUNT(*) AS n FROM relations WHERE project_id=? AND snapshot_id=? "
+            "GROUP BY source", (self.selected_project_id, snapshot_id))
+        return {r["source"].split("@")[0]: r["n"] for r in rows}
+
+    def _handle_relations_error(self, msg: str) -> None:
+        self._relations_running = False
+        self.g_info.set("关系分析出错。")
+        messagebox.showerror("关系分析失败", msg, parent=self.root)
+
+    def on_trace(self) -> None:
+        sel = self.g_files.selection()
+        if not sel:
+            return
+        snap_id = getattr(self, "_graph_snap_id", None)
+        pid = self.selected_project_id
+        if snap_id is None or pid is None:
+            return
+        rel_path = sel[0]
+        direction = {"上游": "upstream", "下游": "downstream", "双向": "both"}[self.g_dir.get()]
+        sub = trace_relations(self.db, pid, snap_id, rel_path, direction=direction)
+        for t in self.g_trace.get_children():
+            self.g_trace.delete(t)
+        self._trace_edges = []
+        cats = {self._graph_norm(r["rel_path"]): r["category"] for r in self.db.query(
+            "SELECT rel_path, category FROM file_records WHERE snapshot_id=?", (snap_id,))}
+        fr = sub.get("root_record")
+        root_cat = fr["category"] if fr else cats.get(rel_path, "")
+        self.g_trace.insert("", "end", tags=("root",), values=(
+            "起点", rel_path, f"{CATEGORY_LABELS.get(root_cat, root_cat)} · 深度 0", "—"))
+        for n in sub["nodes"]:
+            if n["rel_path"] == rel_path:
+                continue
+            cat = cats.get(n["rel_path"], "")
+            self.g_trace.insert("", "end", values=(
+                "节点", n["rel_path"],
+                f"类别 {CATEGORY_LABELS.get(cat, cat) or '—'} · 距起点 {n['depth']} 步", "—"))
+        for i, e in enumerate(sub["edges"]):
+            self._trace_edges.append(e)
+            label = RELATION_LABELS.get(e["relation"], e["relation"])
+            conf = f"{e['confidence']:.1f}"
+            tags = ("lowconf",) if e["confidence"] <= 0.7 else ()
+            self.g_trace.insert("", "end", iid=f"e{i}", tags=tags, values=(
+                "关系", f"{e['src_path']} → {e['dst_path']}", label, conf))
+        self.g_info.set(
+            f"追踪「{rel_path}」（{self.g_dir.get()}，深度≤3）：{len(sub['nodes'])} 个节点、"
+            f"{len(sub['edges'])} 条关系边。双击关系行查看判断依据。")
+
+    def _show_edge_basis(self) -> None:
+        sel = self.g_trace.selection()
+        if not sel or not sel[0].startswith("e"):
+            return
+        e = self._trace_edges[int(sel[0][1:])]
+        rule_desc = next((d for rid, _v, _fn, d in GRAPH_RULES
+                          if e["source"].split("@")[0] == rid), "")
+        lines = [
+            f"关系：{RELATION_LABELS.get(e['relation'], e['relation'])}",
+            f"起点：{e['src_path']}",
+            f"终点：{e['dst_path']}",
+            f"置信度：{e['confidence']:.1f}"
+            + ("（推测，需人工确认）" if e["confidence"] <= 0.7 else "（较强证据）"),
+            f"规则来源：{e['source']}" + (f" — {rule_desc}" if rule_desc else ""),
+            "", "判断依据：", f"  {e['basis']}",
+        ]
+        self._detail_dialog("关系判断依据", "\n".join(lines))
+
+    # ---------------------------------------------------------------- 演化阶段
+    def refresh_phases(self) -> None:
+        for t in self.ph_suggest.get_children():
+            self.ph_suggest.delete(t)
+        for t in self.ph_user.get_children():
+            self.ph_user.delete(t)
+        for t in self.ph_miles.get_children():
+            self.ph_miles.delete(t)
+        pid = self.selected_project_id
+        if pid is None:
+            self.ph_info.set("（左侧选择项目后查看阶段与里程碑）")
+            return
+        # suggest_phases 需读全部快照文件记录，只在后台「生成阶段建议」后缓存展示，
+        # 避免每次切换项目都在 UI 线程全量重算
+        if self._phase_suggestions_pid != pid:
+            self._phase_suggestions = []
+        n_seg = sum(len(p["segments"]) for p in self._phase_suggestions)
+        for p in self._phase_suggestions:
+            for j, seg in enumerate(p["segments"]):
+                rng = (f"#{seg['start_snapshot']}"
+                       + (f" → #{seg['end_snapshot']}" if seg["end_snapshot"] != seg["start_snapshot"] else ""))
+                self.ph_suggest.insert("", "end", iid=f"s{p['key']}|{j}", tags=(
+                    seg["confidence"],), values=(
+                    p["label"], rng, "高" if seg["confidence"] == "high" else "中",
+                    seg["evidence_count"]))
+        for r in self.db.list_phases(pid):
+            src = {"confirmed": "机器建议·人工确认", "user": "人工添加"}.get(r["source"], r["source"])
+            seg = f"#{r['start_snapshot']}" + (
+                f" → #{r['end_snapshot']}" if r["end_snapshot"] is not None
+                and r["end_snapshot"] != r["start_snapshot"] else "")
+            self.ph_user.insert("", "end", iid=str(r["id"]), values=(r["label"], seg, src))
+        for m in self.db.list_milestones(pid):
+            origin = MILESTONE_STATUS.get(m["status"], m["status"])
+            if m["origin"] == "user":
+                origin = f"人工添加·{origin}"
+            self.ph_miles.insert("", "end", iid=str(m["id"]), tags=(
+                "confirmed" if m["status"] == "confirmed" else "",
+                "user" if m["origin"] == "user" else ""), values=(
+                origin, m["title"],
+                f"#{m['snapshot_id']}" if m["snapshot_id"] is not None else "—"))
+        self.ph_info.set(
+            (f"机器建议 {n_seg} 个阶段片段（左上表，双击片段查看阶段间变化），"
+             "确认后入库（左下表）。" if self._phase_suggestions_pid == pid
+             else "点击「生成阶段建议」由机器推导阶段片段（纯函数，不入库）。")
+            + "里程碑首次出现即建议（右表），确认/添加/删除均可。")
+
+    def on_suggest_phases(self) -> None:
+        if self._phases_running:
+            messagebox.showinfo("提示", "阶段分析正在进行。", parent=self.root)
+            return
+        pid = self.selected_project_id
+        if pid is None:
+            messagebox.showinfo("提示", "请先在左侧选择一个项目。", parent=self.root)
+            return
+        latest = self.db.latest_snapshot(pid)
+        if latest is None:
+            messagebox.showinfo("提示", "该项目还没有完成的扫描快照，请先执行扫描。",
+                                parent=self.root)
+            return
+        self._phases_running = True
+        self.ph_info.set("阶段分析中…（纯函数推导，只写里程碑建议入库，不影响人工状态）")
+
+        def work():
+            try:
+                segs = suggest_phases(self.db, pid)
+                created = persist_milestone_suggestions(self.db, pid)
+            except Exception as e:  # 后台线程异常需回传主线程，否则界面状态会卡住
+                self.scan_queue.put(("phases_error", str(e)))
+            else:
+                self.scan_queue.put(("phases_done", (pid, segs, created)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _handle_phases_done(self, payload) -> None:
+        self._phases_running = False
+        pid, segs, created = payload
+        self._phase_suggestions = segs
+        self._phase_suggestions_pid = pid
+        n_seg = sum(len(p["segments"]) for p in segs)
+        self.ph_info.set(f"分析完成：机器建议 {n_seg} 个阶段片段；里程碑建议新建 {created} 条"
+                         "（已有条目的人工状态不受影响）。")
+        self.refresh_phases()
+
+    def _handle_phases_error(self, msg: str) -> None:
+        self._phases_running = False
+        self.ph_info.set("阶段分析出错。")
+        messagebox.showerror("阶段分析失败", msg, parent=self.root)
+
+    def _selected_segment(self) -> tuple[dict, dict] | None:
+        sel = self.ph_suggest.selection()
+        if not sel or "|" not in sel[0]:
+            return None
+        key, j = sel[0][1:].split("|")
+        for p in self._phase_suggestions:
+            if p["key"] == key:
+                return p, p["segments"][int(j)]
+        return None
+
+    def _show_segment_changes(self) -> None:
+        picked = self._selected_segment()
+        if not picked:
+            return
+        p, seg = picked
+        a, b = seg["start_snapshot"], seg["end_snapshot"]
+        d = self.db.compare_snapshots(a, b, limit=2000)
+        ad, rm, md = d["counts"]
+        samples = "、".join(f["rel_path"] for f in (d["added"] + d["modified"])[:5])
+        self.ph_changes.set(
+            f"阶段「{p['label']}」片段 #{a} → #{b} 的可观察变化：新增 {ad} · 删除 {rm} · "
+            f"修改 {md}。" + (f"例如：{samples}" if samples else "（两快照间无文件差异）")
+            + "（完整清单见导出的时间线报告）")
+
+    def on_confirm_segment(self) -> None:
+        picked = self._selected_segment()
+        if not picked:
+            messagebox.showinfo("提示", "请先在「机器阶段建议」中选择一个片段。", parent=self.root)
+            return
+        p, seg = picked
+        samples = "；".join(seg["evidence_samples"][:3])
+        pid = self.db.add_phase(
+            self.selected_project_id, p["key"], p["label"],
+            seg["start_snapshot"], seg["end_snapshot"],
+            note=f"由机器建议人工确认（置信度 {'高' if seg['confidence'] == 'high' else '中'}）；"
+                 f"证据示例：{samples or '无'}",
+            source="confirmed", now=utcnow_iso())
+        self.refresh_phases()
+        self.ph_changes.set(f"已确认阶段「{p['label']}」（记录 #{pid}）— 机器建议与人工确认分开存档。")
+
+    def on_add_phase(self) -> None:
+        pid = self.selected_project_id
+        if pid is None:
+            messagebox.showinfo("提示", "请先在左侧选择一个项目。", parent=self.root)
+            return
+        latest = self.db.latest_snapshot(pid)
+        label = simpledialog.askstring("添加自定义阶段", "阶段名称（如：调研 / 联调 / 重构）：",
+                                       parent=self.root)
+        if not label or not label.strip():
+            return
+        self.db.add_phase(pid, "", label.strip(), latest["id"] if latest else None, None,
+                          note="人工添加", source="user", now=utcnow_iso())
+        self.refresh_phases()
+
+    def on_remove_phase(self) -> None:
+        sel = self.ph_user.selection()
+        if not sel:
+            messagebox.showinfo("提示", "请先在「人工确认 / 自定义阶段」中选择一条。", parent=self.root)
+            return
+        self.db.remove_phase(int(sel[0]))
+        self.refresh_phases()
+
+    def on_confirm_milestone(self) -> None:
+        sel = self.ph_miles.selection()
+        if not sel:
+            messagebox.showinfo("提示", "请先选择一个里程碑。", parent=self.root)
+            return
+        self.db.confirm_milestone(int(sel[0]), utcnow_iso())
+        self.refresh_phases()
+
+    def on_add_milestone(self) -> None:
+        pid = self.selected_project_id
+        if pid is None:
+            messagebox.showinfo("提示", "请先在左侧选择一个项目。", parent=self.root)
+            return
+        title = simpledialog.askstring("添加里程碑", "里程碑名称：", parent=self.root)
+        if not title or not title.strip():
+            return
+        note = simpledialog.askstring("添加里程碑", "备注（可留空）：", parent=self.root) or ""
+        self.db.upsert_milestone(pid, None, title.strip(), note, "[]",
+                                 utcnow_iso(), origin="user")
+        self.refresh_phases()
+
+    def on_remove_milestone(self) -> None:
+        sel = self.ph_miles.selection()
+        if not sel:
+            messagebox.showinfo("提示", "请先选择一个里程碑。", parent=self.root)
+            return
+        self.db.remove_milestone(int(sel[0]))
+        self.refresh_phases()
+
+    def _show_milestone_detail(self) -> None:
+        sel = self.ph_miles.selection()
+        if not sel:
+            return
+        mid = int(sel[0])
+        rows = [m for m in self.db.list_milestones(self.selected_project_id)
+                if m["id"] == mid]
+        if not rows:
+            return
+        m = rows[0]
+        try:
+            ev = json.loads(m["evidence"] or "[]")
+        except (TypeError, ValueError):
+            ev = []
+        lines = [
+            f"里程碑：{m['title']}",
+            f"来源：{'机器建议' if m['origin'] == 'machine' else '人工添加'} · "
+            f"状态：{MILESTONE_STATUS.get(m['status'], m['status'])}",
+            f"快照：{'#' + str(m['snapshot_id']) if m['snapshot_id'] is not None else '（未绑定快照）'}",
+            f"创建：{fmt_time_local(m['created_at'])}"
+            + (f" · 确认：{fmt_time_local(m['confirmed_at'])}" if m["confirmed_at"] else ""),
+            f"备注：{m['note'] or '（无）'}",
+            "", "证据文件：",
+        ]
+        lines += [f"  - {p}" for p in ev] if ev else ["  （无证据记录）"]
+        self._detail_dialog(f"里程碑 #{m['id']}", "\n".join(lines))
+
+    def on_export_timeline(self) -> None:
+        pid = self.selected_project_id
+        if pid is None:
+            messagebox.showinfo("提示", "请先选择一个项目。", parent=self.root)
+            return
+        p = self.db.get_project(pid)
+        path = filedialog.asksaveasfilename(
+            title="保存演化时间线报告", defaultextension=".md",
+            initialfile=f"{p['name']}_演化时间线.md",
+            filetypes=[("Markdown", "*.md"), ("所有文件", "*.*")], parent=self.root)
+        if not path:
+            return
+        try:
+            r = export_timeline_markdown(self.db, pid, path)
+        except OSError as e:
+            messagebox.showerror("导出失败", str(e), parent=self.root)
+            return
+        messagebox.showinfo(
+            "导出完成",
+            f"时间线报告已保存：\n{path}\n\n"
+            f"包含 {r['snapshots']} 次快照、{r['segments']} 个机器阶段片段、"
+            f"{r['milestones']} 条里程碑。", parent=self.root)
 
     # ---------------------------------------------------------------- 事件详情
     def _show_event_detail(self, tree: ttk.Treeview | None = None) -> None:

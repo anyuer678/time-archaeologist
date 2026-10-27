@@ -18,7 +18,7 @@ from typing import Iterator
 
 from .util import utcnow_iso
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _BASE_STATEMENTS = [
     """CREATE TABLE IF NOT EXISTS projects (
@@ -175,6 +175,34 @@ _MIGRATIONS: dict[int, list[str]] = {
     rule_id TEXT PRIMARY KEY,
     enabled INTEGER NOT NULL DEFAULT 1,
     updated_at TEXT)""",
+    ],
+    # v5（2.0 第五步）：里程碑与人工阶段。机器建议与人工确认严格分开（origin/source）。
+    5: [
+        """CREATE TABLE IF NOT EXISTS milestones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    snapshot_id INTEGER,
+    title TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    evidence TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'suggested',
+    origin TEXT NOT NULL DEFAULT 'machine',
+    created_at TEXT NOT NULL,
+    confirmed_at TEXT,
+    UNIQUE(project_id, title, snapshot_id))""",
+        "CREATE INDEX IF NOT EXISTS idx_milestones_project ON milestones(project_id)",
+        """CREATE TABLE IF NOT EXISTS phases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    phase_key TEXT NOT NULL DEFAULT '',
+    label TEXT NOT NULL,
+    start_snapshot INTEGER,
+    end_snapshot INTEGER,
+    note TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'user',
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, label, start_snapshot))""",
+        "CREATE INDEX IF NOT EXISTS idx_phases_project ON phases(project_id)",
     ],
 }
 
@@ -736,3 +764,75 @@ class Database:
                 "INSERT INTO rule_config(rule_id, enabled, updated_at) VALUES(?,?,?) "
                 "ON CONFLICT(rule_id) DO UPDATE SET enabled=excluded.enabled, "
                 "updated_at=excluded.updated_at", (rule_id, int(enabled), now))
+
+    # ---------- 里程碑与阶段（第五步） ----------
+    def upsert_milestone(self, project_id: int, snapshot_id: int | None, title: str,
+                         note: str, evidence_json: str, now: str,
+                         origin: str = "machine") -> bool:
+        """幂等写入里程碑建议；返回是否新建。冲突时仅刷新 note/evidence，
+        保留人工状态（status/confirmed_at 不变）。"""
+        with self._session(write=True) as conn:
+            existed = conn.execute(
+                "SELECT 1 FROM milestones WHERE project_id=? AND title=? AND "
+                "(snapshot_id IS ? OR snapshot_id=?)",
+                (project_id, title, snapshot_id, snapshot_id)).fetchone()
+            if existed:
+                # snapshot_id 为 NULL 时 UNIQUE 不去重（SQLite NULL 语义），必须显式 UPDATE
+                conn.execute(
+                    "UPDATE milestones SET note=?, evidence=? WHERE project_id=? "
+                    "AND title=? AND (snapshot_id IS ? OR snapshot_id=?)",
+                    (note, evidence_json, project_id, title, snapshot_id, snapshot_id))
+            else:
+                conn.execute(
+                    "INSERT INTO milestones(project_id, snapshot_id, title, note, "
+                    "evidence, status, origin, created_at) "
+                    "VALUES(?,?,?,?,?,'suggested',?,?)",
+                    (project_id, snapshot_id, title, note, evidence_json, origin, now))
+            return existed is None
+
+    def list_milestones(self, project_id: int,
+                        status: str | None = None) -> list[sqlite3.Row]:
+        sql = "SELECT * FROM milestones WHERE project_id=?"
+        args: list = [project_id]
+        if status:
+            sql += " AND status=?"
+            args.append(status)
+        sql += " ORDER BY COALESCE(snapshot_id, 0), id"
+        return self.query(sql, tuple(args))
+
+    def confirm_milestone(self, milestone_id: int, now: str) -> None:
+        with self._session(write=True) as conn:
+            conn.execute(
+                "UPDATE milestones SET status='confirmed', confirmed_at=? WHERE id=?",
+                (now, milestone_id))
+
+    def remove_milestone(self, milestone_id: int) -> None:
+        with self._session(write=True) as conn:
+            conn.execute("DELETE FROM milestones WHERE id=?", (milestone_id,))
+
+    def add_phase(self, project_id: int, phase_key: str, label: str,
+                  start_snapshot: int | None, end_snapshot: int | None,
+                  note: str, source: str, now: str) -> int:
+        with self._session(write=True) as conn:
+            cur = conn.execute(
+                "INSERT INTO phases(project_id, phase_key, label, start_snapshot, "
+                "end_snapshot, note, source, created_at) VALUES(?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(project_id, label, start_snapshot) DO UPDATE SET "
+                "end_snapshot=excluded.end_snapshot, note=excluded.note, "
+                "phase_key=excluded.phase_key, source=excluded.source",
+                (project_id, phase_key, label, start_snapshot, end_snapshot, note,
+                 source, now))
+            row = conn.execute(
+                "SELECT id FROM phases WHERE project_id=? AND label=? AND "
+                "(start_snapshot IS ? OR start_snapshot=?)",
+                (project_id, label, start_snapshot, start_snapshot)).fetchone()
+            return row["id"]
+
+    def list_phases(self, project_id: int) -> list[sqlite3.Row]:
+        return self.query(
+            "SELECT * FROM phases WHERE project_id=? "
+            "ORDER BY COALESCE(start_snapshot, 0), id", (project_id,))
+
+    def remove_phase(self, phase_id: int) -> None:
+        with self._session(write=True) as conn:
+            conn.execute("DELETE FROM phases WHERE id=?", (phase_id,))
