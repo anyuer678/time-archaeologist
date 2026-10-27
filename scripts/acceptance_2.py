@@ -89,7 +89,7 @@ check("A9 任务重跑幂等且保留状态",
       (lambda r: r["created"] == 0 and r["updated"] >= 1)(
           generate_tasks(db, a["pid"])))
 
-print("== 项目 B：实验布局样例（.demo/demo_lab） ==")
+print("== 项目 B：实验布局样例（scripts/demo_lab） ==")
 b = pipeline(DEMO_LAB, "实验样例")
 check("B1 扫描到实验布局文件", b["n"] >= 10, f"{b['n']} 文件")
 r3 = run_repro_check(db, b["pid"], b["snap"], "runs/exp03/metrics.json")
@@ -137,7 +137,7 @@ print(f"\nACCEPTANCE {passed}/{len(results)} PASS")
 report = ["# 时光考古机 2.0 最终验收记录（实际运行）", "",
           f"- 运行时间：{time.strftime('%Y-%m-%d %H:%M:%S')}",
           "- 项目 A：本仓库自身源码（普通软件项目，真实文件）",
-          "- 项目 B：仓库自带实验布局样例 .demo/demo_lab（磁盘上真实存在的文件；"
+          "- 项目 B：仓库自带实验布局样例 scripts/demo_lab（磁盘上真实存在的文件；"
           "开发期构建的固定样例目录，非用户真实科研数据，特此说明）",
           "- 数据库：临时目录独立实例，扫描/分析全程只读源目录", ""]
 for name, ok, detail in results:
