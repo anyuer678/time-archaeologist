@@ -18,16 +18,17 @@ from typing import Iterator
 
 from .util import utcnow_iso
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS projects (
+SCHEMA_VERSION = 2
+
+_BASE_STATEMENTS = [
+    """CREATE TABLE IF NOT EXISTS projects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     path TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
     created_at TEXT NOT NULL,
     last_scan_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS scan_runs (
+)""",
+    """CREATE TABLE IF NOT EXISTS scan_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     started_at TEXT NOT NULL,
@@ -38,16 +39,14 @@ CREATE TABLE IF NOT EXISTS scan_runs (
     error_count INTEGER NOT NULL DEFAULT 0,
     error_text TEXT,
     snapshot_id INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS snapshots (
+)""",
+    """CREATE TABLE IF NOT EXISTS snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     run_id INTEGER NOT NULL REFERENCES scan_runs(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS file_records (
+)""",
+    """CREATE TABLE IF NOT EXISTS file_records (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     snapshot_id INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
     rel_path TEXT NOT NULL,
@@ -60,9 +59,8 @@ CREATE TABLE IF NOT EXISTS file_records (
     link_target TEXT,
     read_error TEXT,
     UNIQUE(snapshot_id, rel_path)
-);
-
-CREATE TABLE IF NOT EXISTS events (
+)""",
+    """CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     run_id INTEGER NOT NULL REFERENCES scan_runs(id) ON DELETE CASCADE,
@@ -74,9 +72,8 @@ CREATE TABLE IF NOT EXISTS events (
     certainty TEXT NOT NULL DEFAULT 'observed',
     evidence TEXT NOT NULL DEFAULT '{}',
     UNIQUE(run_id, event_type, rel_path)
-);
-
-CREATE TABLE IF NOT EXISTS findings (
+)""",
+    """CREATE TABLE IF NOT EXISTS findings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     snapshot_id INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
@@ -88,12 +85,61 @@ CREATE TABLE IF NOT EXISTS findings (
     evidence TEXT NOT NULL DEFAULT '{}',
     detected_at TEXT NOT NULL,
     UNIQUE(snapshot_id, rel_path, kind)
-);
+)""",
+    "CREATE INDEX IF NOT EXISTS idx_file_records_snap ON file_records(snapshot_id)",
+    "CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id, id)",
+    "CREATE INDEX IF NOT EXISTS idx_findings_project ON findings(project_id, id)",
+]
 
-CREATE INDEX IF NOT EXISTS idx_file_records_snap ON file_records(snapshot_id);
-CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id, id);
-CREATE INDEX IF NOT EXISTS idx_findings_project ON findings(project_id, id);
-"""
+# v2（2.0 第二步）：成果档案 + 证据关联。全部幂等，旧数据不动。
+_MIGRATIONS: dict[int, list[str]] = {
+    2: [
+        """CREATE TABLE IF NOT EXISTS artifacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    primary_path TEXT NOT NULL,
+    confidence TEXT NOT NULL DEFAULT 'medium',
+    status TEXT NOT NULL DEFAULT 'auto',
+    first_snapshot_id INTEGER,
+    last_snapshot_id INTEGER,
+    first_seen_at TEXT,
+    last_seen_at TEXT,
+    basis TEXT NOT NULL DEFAULT '',
+    details TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(project_id, kind, primary_path)
+)""",
+        """CREATE TABLE IF NOT EXISTS artifact_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    artifact_id INTEGER NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+    snapshot_id INTEGER NOT NULL,
+    rel_path TEXT NOT NULL,
+    role TEXT NOT NULL,
+    basis TEXT NOT NULL DEFAULT '',
+    confidence TEXT NOT NULL DEFAULT 'medium',
+    UNIQUE(artifact_id, snapshot_id, rel_path, role)
+)""",
+        "CREATE INDEX IF NOT EXISTS idx_artifact_files_art ON artifact_files(artifact_id)",
+        """CREATE TABLE IF NOT EXISTS relations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    snapshot_id INTEGER NOT NULL,
+    src_path TEXT NOT NULL,
+    dst_path TEXT NOT NULL,
+    relation TEXT NOT NULL,
+    source TEXT NOT NULL,
+    basis TEXT NOT NULL DEFAULT '',
+    confidence REAL NOT NULL DEFAULT 0.5,
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, snapshot_id, src_path, dst_path, relation, source)
+)""",
+        "CREATE INDEX IF NOT EXISTS idx_relations_snap ON relations(snapshot_id)",
+        "CREATE INDEX IF NOT EXISTS idx_relations_dst ON relations(snapshot_id, dst_path)",
+    ],
+}
 
 
 class Database:
@@ -105,13 +151,33 @@ class Database:
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         with self._session(write=True) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
-            conn.executescript(SCHEMA)
+            self._migrate(conn)
             # 异常恢复：上次会话遗留的 running 扫描标记为 interrupted
             conn.execute(
                 "UPDATE scan_runs SET status='interrupted', finished_at=?, "
                 "error_text='应用中断，重启时自动恢复为中断状态' WHERE status='running'",
                 (utcnow_iso(),),
             )
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """分级迁移：user_version 记录版本，全部语句幂等，旧数据零改动。
+
+        - user_version=0 且已存在 projects 表 → v0.1.0 旧库，视为版本 1。
+        - 每个迁移级为有序 DDL 列表，单个事务内执行，失败整体回滚。
+        """
+        ver = conn.execute("PRAGMA user_version").fetchone()[0]
+        if ver == 0 and conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='projects'"
+        ).fetchone():
+            ver = 1  # v0.1.0 旧库：表已建但未记录版本
+        for stmt in _BASE_STATEMENTS:
+            conn.execute(stmt)
+        for target in sorted(_MIGRATIONS):
+            if ver < target:
+                for stmt in _MIGRATIONS[target]:
+                    conn.execute(stmt)
+        if ver < SCHEMA_VERSION:
+            conn.execute(f"PRAGMA user_version={int(SCHEMA_VERSION)}")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=30.0)
@@ -430,3 +496,115 @@ class Database:
         """人工确认/否决（manual confirmation），与自动判断区分。"""
         with self._session(write=True) as conn:
             conn.execute("UPDATE findings SET status=? WHERE id=?", (status, finding_id))
+
+    # ---------- 成果档案（v2） ----------
+    def upsert_artifact(self, project_id: int, kind: str, name: str, primary_path: str,
+                        confidence: str, basis: str, details: str, snapshot_id: int,
+                        now: str) -> tuple[int, bool]:
+        """按 (project_id, kind, primary_path) 聚合：已存在则更新最近发现，否则新建。
+        返回 (artifact_id, created)。"""
+        with self._session(write=True) as conn:
+            row = conn.execute(
+                "SELECT id FROM artifacts WHERE project_id=? AND kind=? AND primary_path=?",
+                (project_id, kind, primary_path)).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE artifacts SET name=?, confidence=?, last_snapshot_id=?, "
+                    "last_seen_at=?, details=?, updated_at=? WHERE id=?",
+                    (name, confidence, snapshot_id, now, details, now, row["id"]))
+                return row["id"], False
+            cur = conn.execute(
+                "INSERT INTO artifacts(project_id, kind, name, primary_path, confidence, "
+                "status, first_snapshot_id, last_snapshot_id, first_seen_at, last_seen_at, "
+                "basis, details, created_at, updated_at) "
+                "VALUES(?,?,?,?,?,'auto',?,?,?,?,?,?,?,?)",
+                (project_id, kind, name, primary_path, confidence, snapshot_id, snapshot_id,
+                 now, now, basis, details, now, now))
+            return cur.lastrowid, True
+
+    def replace_artifact_files(self, artifact_id: int, snapshot_id: int,
+                               files: list[dict]) -> None:
+        """替换某成果在某快照下的关联文件（分析是确定性的，可安全重跑）。"""
+        with self._session(write=True) as conn:
+            conn.execute("DELETE FROM artifact_files WHERE artifact_id=? AND snapshot_id=?",
+                         (artifact_id, snapshot_id))
+            conn.executemany(
+                "INSERT OR IGNORE INTO artifact_files"
+                "(artifact_id, snapshot_id, rel_path, role, basis, confidence) "
+                "VALUES(?,?,?,?,?,?)",
+                [(artifact_id, snapshot_id, f["rel_path"], f["role"], f.get("basis", ""),
+                  f.get("confidence", "medium")) for f in files])
+
+    def list_artifacts(self, project_id: int, kind: str | None = None,
+                       status: str | None = None, limit: int = 500) -> list[sqlite3.Row]:
+        sql = "SELECT * FROM artifacts WHERE project_id=?"
+        args: list = [project_id]
+        if kind:
+            sql += " AND kind=?"
+            args.append(kind)
+        if status:
+            sql += " AND status=?"
+            args.append(status)
+        sql += " ORDER BY status='rejected', last_seen_at DESC, id DESC LIMIT ?"
+        args.append(limit)
+        return self.query(sql, args)
+
+    def get_artifact(self, artifact_id: int) -> sqlite3.Row | None:
+        return (self.query("SELECT * FROM artifacts WHERE id=?", (artifact_id,)) or [None])[0]
+
+    def set_artifact_status(self, artifact_id: int, status: str) -> None:
+        with self._session(write=True) as conn:
+            conn.execute("UPDATE artifacts SET status=?, updated_at=? WHERE id=?",
+                         (status, utcnow_iso(), artifact_id))
+
+    def list_artifact_files(self, artifact_id: int, snapshot_id: int | None = None
+                            ) -> list[sqlite3.Row]:
+        sql = "SELECT * FROM artifact_files WHERE artifact_id=?"
+        args: list = [artifact_id]
+        if snapshot_id is not None:
+            sql += " AND snapshot_id=?"
+            args.append(snapshot_id)
+        sql += " ORDER BY role, rel_path"
+        return self.query(sql, args)
+
+    # ---------- 关系图谱（v2） ----------
+    def replace_relations(self, project_id: int, snapshot_id: int, edges: list[dict],
+                          sources: list[str] | None = None) -> int:
+        """替换某快照下由指定规则来源产生的边（每条规则独立替换，规则可单独重跑）。"""
+        with self._session(write=True) as conn:
+            if sources is None:
+                conn.execute("DELETE FROM relations WHERE project_id=? AND snapshot_id=?",
+                             (project_id, snapshot_id))
+            else:
+                for s in sources:
+                    conn.execute(
+                        "DELETE FROM relations WHERE project_id=? AND snapshot_id=? AND source=?",
+                        (project_id, snapshot_id, s))
+            if not edges:
+                return 0
+            cur = conn.executemany(
+                "INSERT OR IGNORE INTO relations"
+                "(project_id, snapshot_id, src_path, dst_path, relation, source, basis, "
+                "confidence, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                [(project_id, snapshot_id, e["src_path"], e["dst_path"], e["relation"],
+                  e["source"], e.get("basis", ""), float(e.get("confidence", 0.5)),
+                  e.get("created_at", utcnow_iso())) for e in edges])
+            return cur.rowcount
+
+    def list_relations(self, project_id: int, snapshot_id: int,
+                       src_path: str | None = None, dst_path: str | None = None,
+                       relation: str | None = None, limit: int = 2000) -> list[sqlite3.Row]:
+        sql = "SELECT * FROM relations WHERE project_id=? AND snapshot_id=?"
+        args: list = [project_id, snapshot_id]
+        if src_path:
+            sql += " AND src_path=?"
+            args.append(src_path)
+        if dst_path:
+            sql += " AND dst_path=?"
+            args.append(dst_path)
+        if relation:
+            sql += " AND relation=?"
+            args.append(relation)
+        sql += " ORDER BY confidence DESC, id LIMIT ?"
+        args.append(limit)
+        return self.query(sql, args)
