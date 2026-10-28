@@ -14,7 +14,7 @@
 ## 启动
 
 ```bash
-cd C:\Users\30816\Desktop\timeline
+cd <仓库目录>
 python run_app.py        # 或 python -m time_arch
 ```
 
