@@ -7,6 +7,9 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -193,6 +196,23 @@ class CliTest(unittest.TestCase):
         code, out, err = self.run_cli("tasks", "proj", "--complete", "99999")
         self.assertEqual(code, 2)
         self.assertIn("不存在", err)
+
+    def test_module_routing(self):
+        repo = Path(__file__).resolve().parents[1]
+        env = dict(os.environ, PYTHONIOENCODING="utf-8")
+
+        def run(*flags):
+            return subprocess.run(
+                [sys.executable, "-m", "time_arch", *flags], cwd=repo,
+                capture_output=True, encoding="utf-8", errors="replace",
+                timeout=60, env=env)
+
+        r = run("--version")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Time Archaeologist", r.stdout)
+        r = run("--help")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("scan", r.stdout)
 
     def test_error_codes(self):
         code, out, err = self.run_cli("scan", str(Path(self.tmp.name) / "missing"))

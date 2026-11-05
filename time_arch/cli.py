@@ -384,7 +384,7 @@ def cmd_diff(db: Database, args) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m time_arch", description="时光考古机无头命令行（只读扫描与分析）")
-    parser.add_argument("--db", help="数据库路径（默认 %LOCALAPPDATA%\\TimeArchaeologist"
+    parser.add_argument("--db", help="数据库路径（默认 %%LOCALAPPDATA%%\\TimeArchaeologist"
                                      "\\time_arch.db 或 TIME_ARCH_DB）")
     parser.add_argument("--version", action="version", version=f"Time Archaeologist {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=True)

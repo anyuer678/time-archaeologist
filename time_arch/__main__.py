@@ -4,11 +4,12 @@ import sys
 _CLI_COMMANDS = {"projects", "scan", "analyze", "report", "leads",
                  "dossiers", "repro", "tasks", "timeline", "forensics",
                  "diff", "maintain"}
+_CLI_FLAGS = {"-h", "--help", "--version"}
 
 
 def main() -> None:
     args = sys.argv[1:]
-    if any(a in _CLI_COMMANDS for a in args) or any(a in ("-h", "--help") for a in args):
+    if any(a in _CLI_COMMANDS for a in args) or any(a in _CLI_FLAGS for a in args):
         from .cli import main as cli_main
         sys.exit(cli_main(args))
     from .ui.app import main as ui_main
