@@ -95,6 +95,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 
 - **成果档案**（成果证据页）：对识别出的可执行/发布包/测试报告/实验产物生成档案，
   含相关源码/配置/日志/输出、已验证事实、**尚未验证的假设**、完整性检查与后续工作。
+  对 zip/whl/jar 类发布包只读读取中央目录核对成员（不解压、不执行）；
   发现 `.exe`/`.zip`/`report.md` 不等于项目成功——缺失的证据列为待调查项。
 - **实验复现检查器**：对实验运行目录（参数/输入/随机种子/环境/输出/日志）做只读检查，
   每项证据分级 **A 直接证据 / B 合理推测需人工确认 / C 缺失 / D 相互矛盾**，
@@ -119,7 +120,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（131 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（132 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -159,6 +160,8 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
   实跑 scan→analyze→leads→repro→dossiers 全链路。
 - 完整取证报告（2026-11-05）：`tests/test_forensics.py` 4 项通过——章节齐全、诚实边界声明、
   档案/线索/任务/复现/阶段内容、无扫描项目可构建、导出与重跑确定性、快照范围与错误处理。
+- 发布包成员核对（2026-11-05）：成果档案只读读取 zip 中央目录——真实包列出成员并写入
+  已验证事实，损坏/伪造包明确标为待调查（`tests/test_dossier_graph.py` 正反例）。
 - 2.0 端到端验收 `19/19 PASS`（两个真实目录）：项目 A = 本仓库自身源码（软件项目，
   262 文件：57 关系边、反向追踪 40 节点、14 线索、12 档案、7 阶段片段、14 任务，重跑幂等）；
   项目 B = 仓库自带实验布局样例 `scripts/demo_lab`（真实磁盘文件，开发期构建的固定样例，
@@ -214,7 +217,8 @@ scripts/         ui_smoke.py 冒烟、ui_smoke_2.py 2.0 页签冒烟、acceptanc
   漏检（rsync/git 同款折衷）。
 - 事件按 (run_id, event_type, rel_path) 去重；同一文件在一次扫描间隔内「改了又改回」只表现为无事件。
 - 首次扫描会为全部现存文件生成基线事件（依据注明"登记时已存在，出现时间未知"）。
-- 成果识别基于路径/扩展名启发式，不做内容级鉴定（不解析 zip/jar 内部）。
+- 成果识别基于路径/扩展名启发式；发布包仅只读读取 zip 中央目录核对成员，
+  不解压、不执行，也不鉴定包内内容质量。
 - 文件时间线只回溯到首次登记时刻，无法考古登记之前的历史。
 - Windows 之外的平台界面字体/长路径行为未验证。
 

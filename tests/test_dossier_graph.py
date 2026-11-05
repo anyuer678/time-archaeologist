@@ -5,9 +5,11 @@
 """
 from __future__ import annotations
 
+import io
 import sqlite3
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from time_arch.db import Database, SCHEMA_VERSION
@@ -146,7 +148,34 @@ class TestArtifacts(_Base):
         # .zip 存在不等于交付成功：完整性中「源码」等仍按证据呈现
         states = {c["item"]: c["state"] for c in rel["completeness"]}
         self.assertIn(states["源码"], {"present", "missing"})
+        # 伪 zip（非合法压缩包）：成员核对失败，明确表达为待调查而非成功
+        self.assertEqual(states["包内成员"], "missing")
+        self.assertTrue(any("中央目录" in s for s in rel["unverified_assumptions"]))
         self.assertIn("seed_rule", rel)
+
+    def test_zip_members_read_only(self):
+        root = make_project({})
+        (root / "dist").mkdir()
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("bin/labtool.exe", b"exe")
+            zf.writestr("README.txt", "hello")
+            zf.writestr("config/settings.json", "{}")
+        zip_path = root / "dist" / "labtool-1.0.zip"
+        zip_path.write_bytes(buf.getvalue())
+        pid, _ = self.db.add_project(str(root), "zip项目")
+        snap = run_scan(self.db, pid).snapshot_id
+        arts = analyze_artifacts(self.db, pid, snap)
+        rel = next(a for a in arts if a["kind"] == "software_release")
+        states = {c["item"]: c["state"] for c in rel["completeness"]}
+        self.assertEqual(states["包内成员"], "present")
+        facts = "\n".join(rel["verified_facts"])
+        self.assertIn("只读中央目录", facts)
+        self.assertIn("labtool.exe", facts)
+        self.assertIn("README.txt", facts)
+        # 未解压：dist 目录仍只有原压缩包
+        self.assertEqual([p.name for p in (root / "dist").iterdir()],
+                         ["labtool-1.0.zip"])
 
     def test_document_and_test_result_kinds(self):
         arts = analyze_artifacts(self.db, self.pid, self.snap)

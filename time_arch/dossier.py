@@ -13,9 +13,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import zipfile
 
 from .db import Database
-from .util import utcnow_iso
+from .util import extended_path, utcnow_iso
 
 ARTIFACT_KINDS = {
     "software_release": "软件与发布包",
@@ -50,6 +51,9 @@ _DOC_DIR_RE = re.compile(r"(^|/)(docs?|reports?|papers?)(/|$)", re.IGNORECASE)
 
 _CHECK_SIZE = 512          # 数据集种子最小体积（字节）
 _MAX_MEMBERS_PER_ART = 60  # 单档案关联文件上限（防巨型目录刷屏）
+_ZIP_EXTS = {".zip", ".whl", ".egg", ".jar", ".apk", ".aab", ".msix", ".appx"}
+_ZIP_MAX_ENTRIES = 1000    # 只读中央目录的条目上限（防异常包刷屏）
+_ZIP_SAMPLE = 8
 
 
 def _norm(p: str) -> str:
@@ -112,8 +116,11 @@ def _seeds_software(files: _Files) -> list[dict]:
                         "basis": f"扩展名 {ext} 是可执行/分发格式" + ("，且位于发布目录" if in_release else "")})
         elif ext in _ARCHIVE_EXTS and (in_release or _VERSION_RE.search(_stem(f["rel_path"]))):
             conf = "high" if in_release else "medium"
+            readable = ext in _ZIP_EXTS
             out.append({"file": f, "confidence": conf, "rule": "archive-release",
-                        "basis": "发布目录压缩包或文件名含版本号，可能是发布包（未解包验证内容）"})
+                        "basis": "发布目录压缩包或文件名含版本号，可能是发布包"
+                                 + ("（只读核对包内成员，不解压不执行）" if readable
+                                    else "（未解包验证内容）")})
     return out
 
 
@@ -253,6 +260,30 @@ def _any(candidates, role: str, name_hint: str | None = None):
     return ("missing", "未在快照中发现（待调查项，不代表失败）")
 
 
+def _zip_member_info(root: str, rel_path: str) -> tuple[str, str] | None:
+    """只读读取 zip 中央目录核对发布包成员（不解压、不执行、不联网）。
+    返回 (state, detail)；非 zip 格式返回 None。"""
+    ext = os.path.splitext(rel_path)[1].lower()
+    if ext not in _ZIP_EXTS:
+        return None
+    full = extended_path(os.path.join(root, rel_path.replace("/", os.sep)))
+    try:
+        with zipfile.ZipFile(full) as zf:
+            names = []
+            for info in zf.infolist():
+                if not info.is_dir():
+                    names.append(info.filename)
+                if len(names) >= _ZIP_MAX_ENTRIES:
+                    break
+    except (OSError, zipfile.BadZipFile, RuntimeError):
+        return ("missing", "无法读取压缩包中央目录（文件损坏、加密或不是 zip 格式）")
+    if not names:
+        return ("missing", "压缩包可读，但中央目录中没有文件条目")
+    sample = "、".join(names[:_ZIP_SAMPLE])
+    more = f" 等 {len(names)} 个" if len(names) > _ZIP_SAMPLE else ""
+    return ("present", f"包内成员（只读中央目录，未解压未执行）：{sample}{more}")
+
+
 def _member_roles(rd: str | None, members: list[dict], primary_path: str) -> list[dict]:
     """把关联文件赋角色：运行目录成员按类别映射，主文件为 output。"""
     cat_role = {"config": "params", "log": "log", "data": "data", "source": "source",
@@ -294,6 +325,8 @@ def analyze_artifacts(db: Database, project_id: int, snapshot_id: int) -> list[d
         "SELECT rel_path, size, sha256, category, mtime, read_error "
         "FROM file_records WHERE snapshot_id=?", (snapshot_id,))
     files = _Files(rows)
+    project = db.get_project(project_id)
+    root = project["path"] if project else ""
     artifacts: list[dict] = []
 
     for kind, seeder in SEEDERS.items():
@@ -312,13 +345,24 @@ def analyze_artifacts(db: Database, project_id: int, snapshot_id: int) -> list[d
                 state, detail = probe(linked.values(), files, primary)
                 checklist.append({"item": label, "state": state, "detail": detail})
 
+            zip_note = None
+            if kind == "software_release" and root:
+                zip_note = _zip_member_info(root, primary["rel_path"])
+                if zip_note is not None:
+                    checklist.append({"item": "包内成员", "state": zip_note[0],
+                                      "detail": zip_note[1]})
+
             verified = [
                 f"文件存在于快照 #{snapshot_id}：{_norm(primary['rel_path'])}"
                 f"（{primary['size']} 字节，SHA-256 {'已计算' if primary['sha256'] else '未计算（读取失败）'}）",
                 f"关联文件 {len(linked)} 个，均有快照文件记录可溯源",
             ]
+            if zip_note is not None and zip_note[0] == "present":
+                verified.append(zip_note[1])
             assumptions = [f"识别依据（启发式 {seed['rule']}）：{seed['basis']}。"
                            "成果的实际用途/质量未经执行验证，也不应执行来验证。"]
+            if zip_note is not None and zip_note[0] == "missing":
+                assumptions.append("发布包内容未能核对：" + zip_note[1])
             src_files = [v["rel_path"] for v in linked.values() if v["role"] == "source"]
             if src_files:
                 assumptions.append(f"推测与源码 {', '.join(src_files[:3])} 相关（基于词元/目录匹配，未观察生成过程）。")
