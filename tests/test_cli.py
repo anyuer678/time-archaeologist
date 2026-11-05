@@ -142,6 +142,13 @@ class CliTest(unittest.TestCase):
         self.assertEqual(d["counts"]["added"], 1)
         self.assertEqual(d["counts"]["modified"], 1)
 
+        diff_md = Path(self.tmp.name) / "diff.md"
+        code, out, err = self.run_cli("diff", "proj", "--export", str(diff_md))
+        self.assertEqual(code, 0, err)
+        text = diff_md.read_text(encoding="utf-8")
+        self.assertIn("# 快照对比报告", text)
+        self.assertIn("new_file.py", text)
+
     def test_maintain_backup_integrity_vacuum(self):
         self.scan()
         backup = Path(self.tmp.name) / "backup" / "copy.db"

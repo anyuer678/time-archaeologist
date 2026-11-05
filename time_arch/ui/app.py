@@ -24,7 +24,7 @@ from ..graph import (RELATION_LABELS, RULES as GRAPH_RULES,
 from ..investigate import LEADS_RULES, RULE_LABELS, lead_view, run_lead_analysis
 from ..phases import (MILESTONE_STATUS, export_timeline_markdown,
                       persist_milestone_suggestions, suggest_phases)
-from ..reports import export_report
+from ..reports import build_diff_markdown, export_report
 from ..repro import (ITEM_WEIGHTS, LEVEL_LABELS, LEVEL_POINTS, build_repro_report,
                      load_repro_check, run_repro_check, scoring_rules_text)
 from ..scanner import ScanProgress, ScanResult, ScanService
@@ -64,6 +64,7 @@ class App:
         self._art_rows: dict[int, dict] = {}
         self._repro_result: dict | None = None
         self._repro_history: list[dict] = []
+        self._cmp_diff: dict | None = None
         self._graph_files: list[dict] = []
         self._graph_snap_id: int | None = None
         self._graph_snap_map: dict[str, int] = {}
@@ -628,6 +629,8 @@ class App:
         self.cmp_new.pack(side="left", padx=(4, 10))
         ttk.Button(bar, text="对比", style="Accent.TButton",
                    command=self.on_compare).pack(side="left")
+        ttk.Button(bar, text="导出对比…", command=self.on_export_compare
+                   ).pack(side="left", padx=(6, 0))
         self.cmp_result = tk.StringVar(value="")
         ttk.Label(bar, textvariable=self.cmp_result, style="Dim.TLabel").pack(side="left", padx=10)
 
@@ -1967,6 +1970,8 @@ class App:
     # ---------------------------------------------------------------- 对比
     def refresh_compare_choices(self) -> None:
         pid = self.selected_project_id
+        if self._cmp_diff is not None and self._cmp_diff.get("pid") != pid:
+            self._cmp_diff = None
         self._snap_map.clear()
         values: list[str] = []
         if pid is not None:
@@ -1994,6 +1999,7 @@ class App:
             return
         old_id, new_id = inv[old_label], inv[new_label]
         d = self.db.compare_snapshots(old_id, new_id, limit=1500)
+        self._cmp_diff = {"pid": self.selected_project_id, "old": old_id, "new": new_id}
         a, r, m = d["counts"]
         self.cmp_result.set(f"#{old_id} → #{new_id}：新增 {a} · 删除 {r} · 修改 {m}")
         for f in d["added"]:
@@ -2006,6 +2012,26 @@ class App:
         for f in d["removed"]:
             self.cmp_tree.insert("", "end", tags=("删除",),
                                  values=("删除", f["rel_path"], f"最后见于快照 #{old_id}"))
+
+    def on_export_compare(self) -> None:
+        if self._cmp_diff is None:
+            messagebox.showinfo("提示", "请先执行一次快照对比。", parent=self.root)
+            return
+        old_id, new_id = self._cmp_diff["old"], self._cmp_diff["new"]
+        path = filedialog.asksaveasfilename(
+            title="导出快照对比报告", defaultextension=".md",
+            initialfile=f"快照对比_{old_id}_{new_id}.md",
+            filetypes=[("Markdown", "*.md"), ("所有文件", "*.*")], parent=self.root)
+        if not path:
+            return
+        try:
+            content = build_diff_markdown(self.db, old_id, new_id, limit=1500)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+        except OSError as e:
+            messagebox.showerror("导出失败", str(e), parent=self.root)
+            return
+        messagebox.showinfo("导出完成", f"对比报告已保存：\n{path}", parent=self.root)
 
     # ---------------------------------------------------------------- 导出
     def on_export(self) -> None:

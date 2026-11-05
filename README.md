@@ -40,7 +40,7 @@ python -m time_arch repro <项目> <目标文件> --export 复现报告.md
 python -m time_arch tasks <项目> [--export 任务清单.md]
 python -m time_arch timeline <项目> -o 时间线.md
 python -m time_arch forensics <项目> -o 取证报告.md      # 2.0 完整取证报告
-python -m time_arch diff <项目>                       # 最近两次完成快照对比
+python -m time_arch diff <项目> [--export 对比.md]     # 最近两次完成快照对比
 python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据库维护
 ```
 
@@ -77,7 +77,8 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
      可从任一文件双向追踪，支持路径过滤；大项目可分模块查看。
    - **演化阶段**：机器建议阶段划分（实现/测试/实验/产出…）与里程碑，人工确认后入库，
      与机器推断分开存档；阶段间变化可查看，时间线可导出 Markdown。
-   - **快照对比**：任选两次完成的扫描，列出新增 / 删除 / 修改文件清单。
+   - **快照对比**：任选两次完成的扫描，列出新增 / 删除 / 修改文件清单；
+     「导出对比…」可保存 Markdown 对比报告。
 4. **追溯证据**：任何事件或成果线索**双击**即可查看证据链——判断依据、涉及快照、
    关联文件记录（大小 / mtime / SHA-256 / 类别）；查不到文件记录时明确显示"证据不足"。
 5. **导出报告**：右上角「导出报告」选 Markdown（人读）或 JSON（机读）；
@@ -165,7 +166,8 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
   空目标校验。原有 v0.1.0 冒烟 16/16 无回归。
 - 无头 CLI（2026-11-05）：`tests/test_cli.py` 8 项通过——扫描与项目解析（#ID/路径/名称）、
   分析汇总、线索/档案/任务列表、时间线/报告/取证报告导出、复现检查与报告导出、
-  双快照对比、数据库完整性检查/在线备份/压缩、人工状态变更（线索状态/任务完成与重开）、
+  双快照对比与 Markdown 对比导出、数据库完整性检查/在线备份/压缩、
+  人工状态变更（线索状态/任务完成与重开）、
   模块入口路由（`--version`/`--help` 不启动 GUI）、错误退出码；并已用 `scripts/demo_lab`
   实跑 scan→analyze→leads→repro→dossiers 全链路。
 - 完整取证报告（2026-11-05）：`tests/test_forensics.py` 4 项通过——章节齐全、诚实边界声明、

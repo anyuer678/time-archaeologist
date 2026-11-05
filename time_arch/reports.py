@@ -156,6 +156,34 @@ def build_json(db: Database, project_id: int) -> str:
     return json.dumps(d, ensure_ascii=False, indent=2, default=str)
 
 
+def build_diff_markdown(db: Database, old_id: int, new_id: int,
+                        limit: int = 500) -> str:
+    """两次完成快照的对比报告（观察事实，不做推断）。"""
+    d = db.compare_snapshots(old_id, new_id, limit=limit)
+    added, removed, modified = d["counts"]
+    lines = [f"# 快照对比报告：#{old_id} → #{new_id}", "",
+             "> 观察事实：来自两次完成快照的文件记录对比；"
+             "mtime 变化但内容签名（SHA-256）不变不算修改。", "",
+             f"- 新增 {added} 个，删除 {removed} 个，修改 {modified} 个"
+             f"（最多列出 {limit} 条）", ""]
+    if d["added"]:
+        lines += ["## 新增", ""]
+        lines += [f"- `{_norm_path(f['rel_path'])}`（{f['size']} B）" for f in d["added"]]
+        lines.append("")
+    if d["removed"]:
+        lines += ["## 删除", ""]
+        lines += [f"- `{_norm_path(f['rel_path'])}`" for f in d["removed"]]
+        lines.append("")
+    if d["modified"]:
+        lines += ["## 修改", ""]
+        lines += [f"- `{_norm_path(f['rel_path'])}`：{f['old_size']} B → "
+                  f"{f['new_size']} B（内容签名已变化）" for f in d["modified"]]
+        lines.append("")
+    if not (added or removed or modified):
+        lines += ["（两次快照之间没有新增 / 删除 / 修改。）", ""]
+    return "\n".join(lines) + "\n"
+
+
 def export_report(db: Database, project_id: int, fmt: str, out_path: str) -> str:
     """fmt: 'markdown' | 'json'。写入指定路径并返回该路径。"""
     content = build_markdown(db, project_id) if fmt == "markdown" else build_json(db, project_id)

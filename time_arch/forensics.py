@@ -80,6 +80,7 @@ def build_forensics_markdown(db: Database, project_id: int,
     if artifacts:
         lines.append("档案由单文件启发式线索聚合而成；存在 .exe/.zip/report.md "
                      "不等于交付成功，缺失证据列为待调查项。")
+        lines.append("档案按项目聚合，可能来自不同快照；每份档案标注其最近出现快照。")
         for v in artifacts:
             lines += ["", f"### [{v['kind_label']}] {v['name']}",
                       f"- 状态：{ARTIFACT_STATUS.get(v['status'], v['status'])}"

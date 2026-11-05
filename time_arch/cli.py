@@ -34,7 +34,7 @@ from .graph import run_relation_analysis
 from .investigate import RULE_LABELS, run_lead_analysis
 from .phases import (persist_milestone_suggestions, suggest_milestones,
                      suggest_phases, export_timeline_markdown)
-from .reports import build_json, build_markdown, export_report
+from .reports import build_diff_markdown, build_json, build_markdown, export_report
 from .repro import LEVEL_LABELS, build_repro_report, run_repro_check
 from .scanner import run_scan
 from .tasks import TASK_STATUS, export_tasks_markdown, generate_tasks, task_view
@@ -364,6 +364,9 @@ def cmd_diff(db: Database, args) -> int:
         raise CliError("不足两次完成的快照，无法对比（请先重新扫描）")
     d = db.compare_snapshots(prev["id"], latest["id"], limit=args.limit)
     added, removed, modified = d["counts"]
+    if args.export:
+        with open(args.export, "w", encoding="utf-8") as f:
+            f.write(build_diff_markdown(db, prev["id"], latest["id"], args.limit))
     if args.json:
         _json_out({"old_snapshot": prev["id"], "new_snapshot": latest["id"],
                    "counts": {"added": added, "removed": removed, "modified": modified},
@@ -377,6 +380,8 @@ def cmd_diff(db: Database, args) -> int:
         print(f"  - {f['rel_path']}")
     for f in d["modified"]:
         print(f"  ~ {f['rel_path']}：{f['old_size']}B → {f['new_size']}B")
+    if args.export:
+        print(f"对比报告已导出：{args.export}")
     return 0
 
 
@@ -472,6 +477,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("project")
     p.add_argument("--snapshot", type=int, help="以该快照为“新”端（默认最新）")
     p.add_argument("--limit", type=int, default=50)
+    p.add_argument("--export", help="把 Markdown 对比报告写入该路径")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_diff)
     return parser
