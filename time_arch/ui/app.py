@@ -1,6 +1,7 @@
 """时光考古机主界面（Tkinter）。
 
-区块：项目概览 / 最近发现 / 活动时间线 / 成果证据 / 调查工作台 / 扫描状态 + 快照对比。
+区块：项目概览 / 活动时间线 / 最近发现 / 成果证据（含成果档案）/ 复现检查 /
+调查工作台 / 调查任务 / 演化图谱 / 演化阶段 / 快照对比。
 任何发现可双击查看证据来源并定位文件记录；时间线分页加载。
 """
 from __future__ import annotations
@@ -15,6 +16,7 @@ from .. import APP_NAME_CN, __version__
 from ..analyze import KIND_LABELS
 from ..classify import CATEGORY_LABELS
 from ..db import Database
+from ..dossier import ARTIFACT_KINDS, ROLE_LABELS, dossier_view, run_dossier_analysis
 from ..graph import (RELATION_LABELS, RULES as GRAPH_RULES,
                      RULE_LABELS as GRAPH_RULE_LABELS,
                      run_relation_analysis, trace_relations)
@@ -22,6 +24,8 @@ from ..investigate import LEADS_RULES, RULE_LABELS, lead_view, run_lead_analysis
 from ..phases import (MILESTONE_STATUS, export_timeline_markdown,
                       persist_milestone_suggestions, suggest_phases)
 from ..reports import export_report
+from ..repro import (ITEM_WEIGHTS, LEVEL_LABELS, LEVEL_POINTS, build_repro_report,
+                     load_repro_check, run_repro_check, scoring_rules_text)
 from ..scanner import ScanProgress, ScanResult, ScanService
 from ..tasks import (TASK_STATUS, export_tasks_markdown, generate_tasks,
                      task_view)
@@ -34,7 +38,10 @@ EVENT_LABELS = {
 }
 CERTAINTY_LABELS = {"observed": "观察事实", "inferred": "推测"}
 FINDING_STATUS = {"auto": "自动判断", "confirmed": "人工确认", "rejected": "人工否决"}
+ARTIFACT_STATUS = {"auto": "自动判断", "confirmed": "人工确认", "rejected": "人工否决"}
 LEAD_STATUS = {"open": "待查看", "acknowledged": "已知悉", "dismissed": "已忽略"}
+REPRO_HINT = ("对实验运行目录做只读复现检查：参数/输入/随机种子/源码/环境/起止记录/"
+              "输出/错误/重复差异逐项 A–D 分级。不安装依赖、不联网、不执行任何程序。")
 PAGE_SIZE = 200
 
 
@@ -49,8 +56,12 @@ class App:
         self.tl_page = 0
         self._snap_map: dict[int, dict] = {}
         self._leads_running = False
+        self._dossiers_running = False
         self._relations_running = False
         self._phases_running = False
+        self._art_rows: dict[int, dict] = {}
+        self._repro_result: dict | None = None
+        self._repro_history: list[dict] = []
         self._graph_files: list[dict] = []
         self._graph_snap_id: int | None = None
         self._graph_snap_map: dict[str, int] = {}
@@ -122,6 +133,7 @@ class App:
         self._build_timeline_tab()
         self._build_recent_tab()
         self._build_findings_tab()
+        self._build_repro_tab()
         self._build_leads_tab()
         self._build_task_tab()
         self._build_graph_tab()
@@ -270,7 +282,7 @@ class App:
         ttk.Button(top, text="否决(人工)", command=lambda: self._set_finding("rejected")
                    ).pack(side="right", padx=2)
         cols = ("status", "kind", "confidence", "file", "basis", "snapshot")
-        self.fd_tree = ttk.Treeview(tab, columns=cols, show="headings")
+        self.fd_tree = ttk.Treeview(tab, columns=cols, show="headings", height=8)
         for col, text, w, anchor in (
                 ("status", "状态", 80, "w"), ("kind", "类型", 90, "w"),
                 ("confidence", "置信度", 60, "w"), ("file", "文件", 380, "w"),
@@ -282,6 +294,89 @@ class App:
         for conf, color in (("high", "#9fbf7f"), ("medium", "#d8b35a"), ("low", "#a08a6a")):
             self.fd_tree.tag_configure(conf, foreground=color)
         self.fd_tree.tag_configure("rejected", foreground=FG_DIM)
+
+        # 2.0 成果档案：把单文件线索聚合成带证据链的档案
+        ttk.Separator(tab).pack(fill="x", pady=(8, 4))
+        abar = ttk.Frame(tab)
+        abar.pack(fill="x")
+        ttk.Button(abar, text="生成/刷新成果档案（最新快照）", style="Accent.TButton",
+                   command=self.on_analyze_artifacts).pack(side="left")
+        ttk.Button(abar, text="确认(人工)", command=lambda: self._set_artifact("confirmed")
+                   ).pack(side="right", padx=2)
+        ttk.Button(abar, text="否决(人工)", command=lambda: self._set_artifact("rejected")
+                   ).pack(side="right", padx=2)
+        ttk.Button(abar, text="恢复自动", command=lambda: self._set_artifact("auto")
+                   ).pack(side="right", padx=2)
+        self.art_info = tk.StringVar(
+            value="成果档案：可执行/发布包/测试报告/实验产物/数据集/文档的证据链；"
+                  "双击查看已验证事实、未验证假设与完整性检查。")
+        ttk.Label(tab, textvariable=self.art_info, style="Dim.TLabel", wraplength=1200,
+                  justify="left").pack(anchor="w", pady=(4, 2))
+        cols = ("status", "kind", "name", "confidence", "primary", "seen")
+        self.art_tree = ttk.Treeview(tab, columns=cols, show="headings", height=6)
+        for col, text, w, anchor in (
+                ("status", "状态", 80, "w"), ("kind", "类型", 110, "w"),
+                ("name", "档案", 260, "w"), ("confidence", "置信度", 60, "w"),
+                ("primary", "主文件", 420, "w"), ("seen", "最近出现", 130, "w")):
+            self.art_tree.heading(col, text=text)
+            self.art_tree.column(col, width=w, anchor=anchor,
+                                 stretch=(col in ("name", "primary")))
+        self.art_tree.pack(fill="x")
+        self.art_tree.bind("<Double-1>", lambda e: self._show_artifact_detail())
+        for conf, color in (("high", "#9fbf7f"), ("medium", "#d8b35a"), ("low", "#a08a6a")):
+            self.art_tree.tag_configure(conf, foreground=color)
+        self.art_tree.tag_configure("rejected", foreground=FG_DIM)
+        ttk.Label(tab, text="发现 .exe/.zip/report.md 不等于交付成功：缺失的证据列为待调查项，"
+                            "不判成功也不判失败。", style="Dim.TLabel").pack(anchor="w", pady=(2, 0))
+
+    def _build_repro_tab(self) -> None:
+        tab = ttk.Frame(self.tabs, padding=10)
+        self.tabs.add(tab, text="  复现检查  ")
+        bar = ttk.Frame(tab)
+        bar.pack(fill="x", pady=(0, 4))
+        ttk.Label(bar, text="目标文件（项目内相对路径）").pack(side="left")
+        self.rp_target = ttk.Combobox(bar, width=46)
+        self.rp_target.pack(side="left", padx=(4, 6))
+        ttk.Button(bar, text="运行检查（只读）", style="Accent.TButton",
+                   command=self.on_run_repro).pack(side="left")
+        ttk.Button(bar, text="导出报告…", command=self.on_export_repro
+                   ).pack(side="left", padx=(6, 12))
+        ttk.Label(bar, text="历史").pack(side="left")
+        self.rp_history = ttk.Combobox(bar, width=42, state="readonly")
+        self.rp_history.pack(side="left", padx=(4, 4))
+        ttk.Button(bar, text="载入", command=self.on_load_repro).pack(side="left")
+
+        self.rp_info = tk.StringVar(value=REPRO_HINT)
+        ttk.Label(tab, textvariable=self.rp_info, style="Dim.TLabel", wraplength=1200,
+                  justify="left").pack(anchor="w", pady=(0, 4))
+
+        cols = ("item", "level", "weight", "points", "detail")
+        self.rp_tree = ttk.Treeview(tab, columns=cols, show="headings", height=10)
+        for col, text, w, anchor in (
+                ("item", "检查项", 110, "w"), ("level", "等级", 50, "center"),
+                ("weight", "权重", 50, "e"), ("points", "得分", 50, "e"),
+                ("detail", "证据/说明", 820, "w")):
+            self.rp_tree.heading(col, text=text)
+            self.rp_tree.column(col, width=w, anchor=anchor, stretch=(col == "detail"))
+        self.rp_tree.pack(fill="both", expand=True)
+        for level, color in (("A", "#9fbf7f"), ("B", "#d8b35a"),
+                             ("C", "#c98a5a"), ("D", "#d17a7a")):
+            self.rp_tree.tag_configure(level, foreground=color)
+
+        ttk.Label(tab, text="评分规则（完全公开，随每份报告输出；总分只衡量证据覆盖度，"
+                            "不代表实验成功或失败）", style="Accent.TLabel"
+                  ).pack(anchor="w", pady=(6, 2))
+        self.rp_rules = tk.Text(tab, height=6, bg=PANEL, fg=FG, insertbackground=FG,
+                                relief="flat", font=("Consolas", 9), wrap="word",
+                                padx=8, pady=4)
+        self._set_rules_text(scoring_rules_text())
+        self.rp_rules.pack(fill="x")
+
+    def _set_rules_text(self, rules: list[str]) -> None:
+        self.rp_rules.configure(state="normal")
+        self.rp_rules.delete("1.0", "end")
+        self.rp_rules.insert("1.0", "\n".join(f"· {r}" for r in rules))
+        self.rp_rules.configure(state="disabled")
 
     def _build_leads_tab(self) -> None:
         tab = ttk.Frame(self.tabs, padding=10)
@@ -651,6 +746,10 @@ class App:
                     self._handle_leads_done(payload)
                 elif kind == "leads_error":
                     self._handle_leads_error(payload)
+                elif kind == "dossiers_done":
+                    self._handle_dossiers_done(payload)
+                elif kind == "dossiers_error":
+                    self._handle_dossiers_error(payload)
                 elif kind == "relations_done":
                     self._handle_relations_done(payload)
                 elif kind == "relations_error":
@@ -688,6 +787,8 @@ class App:
         self.refresh_timeline()
         self.refresh_recent()
         self.refresh_findings()
+        self.refresh_artifacts()
+        self.refresh_repro()
         self.refresh_leads()
         self.refresh_tasks()
         self.refresh_graph()
@@ -855,6 +956,234 @@ class App:
         else:
             lines.append("  证据不足：该文件在此快照中无记录。")
         self._detail_dialog(f"成果证据 #{r['id']}", "\n".join(lines))
+
+    # ---------------------------------------------------------------- 成果档案
+    def refresh_artifacts(self) -> None:
+        for t in self.art_tree.get_children():
+            self.art_tree.delete(t)
+        self._art_rows = {}
+        pid = self.selected_project_id
+        if pid is None:
+            self.art_info.set("（左侧选择项目后，可生成成果档案）")
+            return
+        rows = self.db.list_artifacts(pid)
+        for r in rows:
+            self._art_rows[r["id"]] = dict(r)
+        confirmed = sum(1 for r in rows if r["status"] == "confirmed")
+        self.art_info.set(
+            f"共 {len(rows)} 份成果档案，人工确认 {confirmed} 份。"
+            "双击查看证据链；档案基于快照记录，非执行验证。")
+        for r in rows:
+            tags = [r["confidence"]]
+            if r["status"] == "rejected":
+                tags.append("rejected")
+            self.art_tree.insert("", "end", iid=str(r["id"]), tags=tuple(tags), values=(
+                ARTIFACT_STATUS.get(r["status"], r["status"]),
+                ARTIFACT_KINDS.get(r["kind"], r["kind"]), r["name"], r["confidence"],
+                r["primary_path"], fmt_time_local(r["last_seen_at"])))
+
+    def on_analyze_artifacts(self) -> None:
+        if self._dossiers_running:
+            messagebox.showinfo("提示", "成果档案分析正在进行。", parent=self.root)
+            return
+        pid = self.selected_project_id
+        if pid is None:
+            messagebox.showinfo("提示", "请先在左侧选择一个项目。", parent=self.root)
+            return
+        latest = self.db.latest_snapshot(pid)
+        if latest is None:
+            messagebox.showinfo("提示", "该项目还没有完成的扫描快照，请先执行扫描。",
+                                parent=self.root)
+            return
+        self._dossiers_running = True
+        self.art_info.set("成果档案分析中…（只读快照记录，不修改项目文件）")
+
+        def work():
+            try:
+                result = run_dossier_analysis(self.db, pid, latest["id"])
+            except Exception as e:  # 后台线程异常需回传主线程，否则界面状态会卡住
+                self.scan_queue.put(("dossiers_error", str(e)))
+            else:
+                self.scan_queue.put(("dossiers_done", result))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _handle_dossiers_done(self, result: dict) -> None:
+        self._dossiers_running = False
+        self.art_info.set(
+            f"分析完成（快照 #{result['snapshot_id']}）：新建 {result['artifacts_created']} 份，"
+            f"更新 {result['artifacts_updated']} 份，共 {result['total']} 份成果档案。")
+        self.refresh_artifacts()
+
+    def _handle_dossiers_error(self, msg: str) -> None:
+        self._dossiers_running = False
+        self.art_info.set("成果档案分析出错。")
+        messagebox.showerror("成果档案分析失败", msg, parent=self.root)
+
+    def _set_artifact(self, status: str) -> None:
+        sel = self.art_tree.selection()
+        if not sel:
+            messagebox.showinfo("提示", "请先在成果档案列表中选择一份档案。", parent=self.root)
+            return
+        self.db.set_artifact_status(int(sel[0]), status)
+        self.refresh_artifacts()
+
+    def _show_artifact_detail(self) -> None:
+        sel = self.art_tree.selection()
+        if not sel:
+            return
+        v = dossier_view(self.db, int(sel[0]))
+        if v is None:
+            return
+        lines = [
+            f"类型：{v['kind_label']} · 置信度：{v['confidence']}（启发式）"
+            f" · 状态：{ARTIFACT_STATUS.get(v['status'], v['status'])}",
+            f"名称：{v['name']}",
+            f"主文件：{v['primary_path']}",
+            f"首次发现 {fmt_time_local(v['first_seen_at'])}"
+            f" · 最近出现 {fmt_time_local(v['last_seen_at'])} · 快照 #{v['snapshot_id']}",
+            f"识别依据：{v['basis']}",
+            "", "已验证事实（快照记录）：",
+        ]
+        lines += [f"  - {x}" for x in v["verified_facts"]] or ["  （无）"]
+        lines += ["", "尚未验证的假设："]
+        lines += [f"  - {x}" for x in v["unverified_assumptions"]] or ["  （无）"]
+        lines += ["", "完整性检查（缺失项 = 待调查，不代表失败）："]
+        state_labels = {"present": "有直接证据", "inferred": "推测存在",
+                        "missing": "未发现（待调查）"}
+        for c in v["completeness"]:
+            lines.append(f"  - [{state_labels.get(c['state'], c['state'])}] "
+                         f"{c['item']}：{c['detail']}")
+        if not v["completeness"]:
+            lines.append("  （无检查项）")
+        lines += ["", "后续工作："]
+        lines += [f"  - {x}" for x in v["next_steps"]] or ["  （无）"]
+        lines += ["", "关联文件（档案最近快照）："]
+        for f in v["files"]:
+            mark = "" if f["in_snapshot"] else "（快照中无记录）"
+            lines.append(f"  - [{ROLE_LABELS.get(f['role'], f['role'])}] "
+                         f"{f['rel_path']}{mark}")
+            if f["in_snapshot"]:
+                sha = f["sha256"][:12] + "…" if f["sha256"] else "未计算"
+                lines.append(f"      {fmt_size(f['size'])} · SHA-256 {sha}"
+                             f" · 类别 {CATEGORY_LABELS.get(f['category'], f['category'])}")
+        if not v["files"]:
+            lines.append("  （无关联文件）")
+        self._detail_dialog(f"成果档案 #{v['id']} · {v['kind_label']}", "\n".join(lines))
+
+    # ---------------------------------------------------------------- 复现检查
+    def refresh_repro(self) -> None:
+        pid = self.selected_project_id
+        if self._repro_result is not None and self._repro_result.get("project_id") != pid:
+            self._repro_result = None
+            for t in self.rp_tree.get_children():
+                self.rp_tree.delete(t)
+            self._set_rules_text(scoring_rules_text())
+            self.rp_info.set(REPRO_HINT)
+        self._repro_history = []
+        self.rp_history.configure(values=[])
+        self.rp_history.set("")
+        if pid is None:
+            self.rp_target.configure(values=[])
+            return
+        latest = self.db.latest_snapshot(pid)
+        if latest is None:
+            self.rp_target.configure(values=[])
+            return
+        self.rp_target.configure(values=self._repro_candidates(latest["id"]))
+        rows = self.db.list_repro_checks(pid, latest["id"], limit=100)
+        vals = []
+        for r in rows:
+            self._repro_history.append(dict(r))
+            vals.append(f"#{r['id']} · {r['target_path']} · {r['level']} · "
+                        f"{fmt_time_local(r['generated_at'])}")
+        self.rp_history.configure(values=vals)
+
+    def _repro_candidates(self, snapshot_id: int) -> list[str]:
+        rows = self.db.query(
+            "SELECT rel_path FROM file_records WHERE snapshot_id=? "
+            "AND (read_error IS NULL OR read_error='') ORDER BY rel_path", (snapshot_id,))
+        hints = ("metrics", "result", "loss", "eval", "output", "summary", "report", "log")
+        out: list[str] = []
+        for r in rows:
+            p = str(r["rel_path"]).replace("\\", "/")
+            name = p.rsplit("/", 1)[-1].lower()
+            if "/runs/" in p.lower() or any(h in name for h in hints):
+                out.append(p)
+            if len(out) >= 300:
+                break
+        return out
+
+    def on_run_repro(self) -> None:
+        pid = self.selected_project_id
+        if pid is None:
+            messagebox.showinfo("提示", "请先在左侧选择一个项目。", parent=self.root)
+            return
+        latest = self.db.latest_snapshot(pid)
+        if latest is None:
+            messagebox.showinfo("提示", "该项目还没有完成的扫描快照，请先执行扫描。",
+                                parent=self.root)
+            return
+        target = self.rp_target.get().strip().replace("\\", "/")
+        if not target:
+            messagebox.showinfo("提示", "请输入或选择项目内的一个目标文件"
+                                        "（通常是实验运行目录中的结果文件）。", parent=self.root)
+            return
+        try:
+            result = run_repro_check(self.db, pid, latest["id"], target)
+        except Exception as e:
+            messagebox.showerror("复现检查失败", str(e), parent=self.root)
+            return
+        self._apply_repro_result(result)
+        self.refresh_repro()
+
+    def _apply_repro_result(self, result: dict, prefix: str = "") -> None:
+        self._repro_result = result
+        run_dir = f" · 运行目录 {result['run_dir']}" if result.get("run_dir") else ""
+        self.rp_info.set(
+            f"{prefix}快照 #{result['snapshot_id']}："
+            f"{LEVEL_LABELS.get(result['level'], result['level'])} · "
+            f"总分 {result['score']}/100{run_dir} · "
+            f"生成于 {fmt_time_local(result.get('generated_at'))}")
+        for t in self.rp_tree.get_children():
+            self.rp_tree.delete(t)
+        for c in result.get("checks") or []:
+            pts = round(ITEM_WEIGHTS.get(c["item"], 0) * LEVEL_POINTS.get(c["level"], 0), 1)
+            ev = "；".join(c.get("evidence") or [])
+            detail = str(c.get("detail") or "") + (f"（{ev}）" if ev else "")
+            self.rp_tree.insert("", "end", tags=(c["level"],), values=(
+                c["item"], c["level"], ITEM_WEIGHTS.get(c["item"], "—"), pts, detail))
+        self._set_rules_text(result.get("scoring_rules") or scoring_rules_text())
+
+    def on_load_repro(self) -> None:
+        idx = self.rp_history.current()
+        if idx < 0 or idx >= len(self._repro_history):
+            messagebox.showinfo("提示", "请先选择一条历史检查记录。", parent=self.root)
+            return
+        result = load_repro_check(self.db, self._repro_history[idx]["id"])
+        if result is None:
+            messagebox.showinfo("提示", "该历史记录已不存在。", parent=self.root)
+            return
+        self.rp_target.set(result.get("target_path") or "")
+        self._apply_repro_result(result, prefix="已载入历史记录 · ")
+
+    def on_export_repro(self) -> None:
+        if self._repro_result is None:
+            messagebox.showinfo("提示", "请先运行或载入一次复现检查。", parent=self.root)
+            return
+        path = filedialog.asksaveasfilename(
+            parent=self.root, title="导出复现就绪度报告", defaultextension=".md",
+            initialfile="repro_report.md",
+            filetypes=[("Markdown", "*.md"), ("所有文件", "*.*")])
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(build_repro_report(self._repro_result))
+        except OSError as e:
+            messagebox.showerror("导出失败", str(e), parent=self.root)
+            return
+        messagebox.showinfo("导出完成", f"复现报告已导出：\n{path}", parent=self.root)
 
     # ---------------------------------------------------------------- 调查线索
     def refresh_leads(self) -> None:
