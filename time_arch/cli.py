@@ -12,6 +12,7 @@
   python -m time_arch timeline <项目> [-o 时间线.md]
   python -m time_arch forensics <项目> [-o 取证报告.md]
   python -m time_arch diff <项目> [--json]
+  python -m time_arch maintain [--integrity] [--backup 备份.db] [--vacuum]
 
 所有分析均为只读：不执行被扫描目录中的任何程序、不联网。
 退出码：0 成功；2 参数/项目/快照问题；1 运行时异常。
@@ -294,6 +295,29 @@ def cmd_forensics(db: Database, args) -> int:
     return 0
 
 
+def cmd_maintain(db: Database, args) -> int:
+    if not (args.integrity or args.backup or args.vacuum):
+        raise CliError("请至少指定 --integrity / --backup / --vacuum 之一")
+    out: dict = {}
+    if args.integrity:
+        out["integrity"] = db.integrity_check()
+    if args.backup:
+        out["backup"] = db.backup(args.backup)
+    if args.vacuum:
+        db.vacuum()
+        out["vacuum"] = "done"
+    if args.json:
+        _json_out(out)
+        return 0
+    if "integrity" in out:
+        print(f"完整性检查：{out['integrity']}")
+    if "backup" in out:
+        print(f"备份已写入：{out['backup']}")
+    if "vacuum" in out:
+        print("数据库已压缩（VACUUM）")
+    return 0
+
+
 def cmd_diff(db: Database, args) -> int:
     p = _resolve_project(db, args.project)
     latest = _snapshot(db, p["id"], args.snapshot)
@@ -391,6 +415,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--out", help="默认输出到标准输出")
     p.add_argument("--snapshot", type=int)
     p.set_defaults(func=cmd_forensics)
+
+    p = sub.add_parser("maintain", help="数据库维护：完整性检查/在线备份/压缩")
+    p.add_argument("--integrity", action="store_true")
+    p.add_argument("--backup", metavar="PATH")
+    p.add_argument("--vacuum", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_maintain)
 
     p = sub.add_parser("diff", help="对比最近两次完成的快照")
     p.add_argument("project")

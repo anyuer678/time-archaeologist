@@ -292,6 +292,28 @@ class Database:
         with self._session() as conn:
             return conn.execute(sql, args).fetchall()
 
+    # ---------- 维护 ----------
+    def integrity_check(self) -> str:
+        rows = self.query("PRAGMA integrity_check")
+        return str(rows[0][0]) if rows else "unknown"
+
+    def backup(self, dest_path: str) -> str:
+        """SQLite 在线备份到指定文件（backup API，WAL 安全）。返回目标路径。"""
+        dest = str(Path(dest_path))
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        dst = sqlite3.connect(dest)
+        try:
+            with self._session() as src:
+                src.backup(dst)
+            dst.commit()
+        finally:
+            dst.close()
+        return dest
+
+    def vacuum(self) -> None:
+        with self._session(write=True) as conn:
+            conn.execute("VACUUM")
+
     # ---------- 项目 ----------
     def add_project(self, abs_path: str, name: str | None = None) -> tuple[int, bool]:
         """登记项目。若路径已存在则返回既有 id。返回 (id, created)。"""

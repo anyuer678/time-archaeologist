@@ -36,6 +36,7 @@ python -m time_arch tasks <项目> [--export 任务清单.md]
 python -m time_arch timeline <项目> -o 时间线.md
 python -m time_arch forensics <项目> -o 取证报告.md      # 2.0 完整取证报告
 python -m time_arch diff <项目>                       # 最近两次完成快照对比
+python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据库维护
 ```
 
 `--db <路径>` 放在子命令之前可指定数据库；不带子命令时仍启动 GUI。
@@ -118,7 +119,7 @@ python -m time_arch diff <项目>                       # 最近两次完成快�
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（130 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（131 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -152,9 +153,10 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
 - 2.0 页签冒烟（2026-11-05）：`scripts/ui_smoke_2.py` 8/8 通过——成果档案生成/列表/详情/
   人工确认-否决-恢复自动；复现检查运行（demo_lab exp03，B 级 9 项）、评分规则常显、
   历史载入、复现报告导出、完整取证报告导出、空目标校验。原有 v0.1.0 冒烟 16/16 无回归。
-- 无头 CLI（2026-11-05）：`tests/test_cli.py` 5 项通过——扫描与项目解析（#ID/路径/名称）、
+- 无头 CLI（2026-11-05）：`tests/test_cli.py` 6 项通过——扫描与项目解析（#ID/路径/名称）、
   分析汇总、线索/档案/任务列表、时间线/报告/取证报告导出、复现检查与报告导出、
-  双快照对比、错误退出码；并已用 `scripts/demo_lab` 实跑 scan→analyze→leads→repro→dossiers 全链路。
+  双快照对比、数据库完整性检查/在线备份/压缩、错误退出码；并已用 `scripts/demo_lab`
+  实跑 scan→analyze→leads→repro→dossiers 全链路。
 - 完整取证报告（2026-11-05）：`tests/test_forensics.py` 4 项通过——章节齐全、诚实边界声明、
   档案/线索/任务/复现/阶段内容、无扫描项目可构建、导出与重跑确定性、快照范围与错误处理。
 - 2.0 端到端验收 `19/19 PASS`（两个真实目录）：项目 A = 本仓库自身源码（软件项目，
@@ -184,12 +186,13 @@ time_arch/
 ├── phases.py    2.0 演化阶段 / 里程碑（机器建议与人工确认分开存档）
 ├── tasks.py     2.0 调查任务生成（由真实线索派生，人工确认完成）
 ├── forensics.py 2.0 完整取证报告（档案/线索/任务/复现/阶段汇总为 Markdown）
-├── cli.py       无头命令行（projects/scan/analyze/report/leads/dossiers/repro/tasks/timeline/forensics/diff）
+├── cli.py       无头命令行（projects/scan/analyze/report/leads/dossiers/repro/tasks/
+│                timeline/forensics/diff/maintain）
 ├── reports.py   Markdown / JSON 报告导出
 ├── util.py      时间/路径/长路径前缀等工具
-└── ui/          Tkinter 深色界面（theme.py 主题 + app.py 主窗口，九页签）
+└── ui/          Tkinter 深色界面（theme.py 主题 + app.py 主窗口，十页签）
 tests/           unittest 测试（classify / db / scanner / analyze_reports / recovery /
-                 graph / dossier / repro / investigate / tasks / 迁移兼容）
+                 graph / dossier / repro / investigate / tasks / cli / forensics / 迁移兼容）
 scripts/         ui_smoke.py 冒烟、ui_smoke_2.py 2.0 页签冒烟、acceptance_check.py v0.1.0 验收、
                  acceptance_2.py 2.0 双项目验收、perf_check.py 性能基准、demo_lab/ 实验布局样例
 ```
@@ -214,3 +217,7 @@ scripts/         ui_smoke.py 冒烟、ui_smoke_2.py 2.0 页签冒烟、acceptanc
 - 成果识别基于路径/扩展名启发式，不做内容级鉴定（不解析 zip/jar 内部）。
 - 文件时间线只回溯到首次登记时刻，无法考古登记之前的历史。
 - Windows 之外的平台界面字体/长路径行为未验证。
+
+## 许可证
+
+MIT License，详见仓库根目录 `LICENSE`。

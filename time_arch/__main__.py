@@ -2,7 +2,8 @@
 import sys
 
 _CLI_COMMANDS = {"projects", "scan", "analyze", "report", "leads",
-                 "dossiers", "repro", "tasks", "timeline", "forensics", "diff"}
+                 "dossiers", "repro", "tasks", "timeline", "forensics",
+                 "diff", "maintain"}
 
 
 def main() -> None:

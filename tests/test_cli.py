@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 from time_arch import cli
+from time_arch.db import Database
 
 FILES = {
     "src/train.py": "def train():\n    return 1\n",
@@ -137,6 +138,23 @@ class CliTest(unittest.TestCase):
         d = json.loads(out)
         self.assertEqual(d["counts"]["added"], 1)
         self.assertEqual(d["counts"]["modified"], 1)
+
+    def test_maintain_backup_integrity_vacuum(self):
+        self.scan()
+        backup = Path(self.tmp.name) / "backup" / "copy.db"
+        code, out, err = self.run_cli("maintain", "--integrity", "--backup", str(backup),
+                                      "--vacuum", "--json")
+        self.assertEqual(code, 0, err)
+        data = json.loads(out)
+        self.assertEqual(data["integrity"], "ok")
+        self.assertEqual(data["vacuum"], "done")
+        self.assertTrue(Path(data["backup"]).exists())
+        copy = Database(str(backup))
+        self.assertEqual(len(copy.list_projects()), 1)
+        self.assertEqual(len(copy.list_snapshots(1)), 1)
+        code, out, err = self.run_cli("maintain")
+        self.assertEqual(code, 2)
+        self.assertIn("至少指定", err)
 
     def test_error_codes(self):
         code, out, err = self.run_cli("scan", str(Path(self.tmp.name) / "missing"))
