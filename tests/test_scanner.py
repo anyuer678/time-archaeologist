@@ -61,6 +61,21 @@ class TestScanner(unittest.TestCase):
         self.assertEqual(recs["main.py"]["category"], "source")
         self.assertEqual(recs[os.path.join("logs", "app.log")]["category"], "log")
 
+    def test_exclude_directories(self):
+        (self.root / ".git" / "objects").mkdir(parents=True)
+        (self.root / ".git" / "objects" / "aa").write_text("x", encoding="utf-8")
+        (self.root / "node_modules" / "pkg").mkdir(parents=True)
+        (self.root / "node_modules" / "pkg" / "i.js").write_text("y", encoding="utf-8")
+        res = run_scan(self.db, self.pid, excludes={".git", "node_modules"})
+        recs = self._snapshot_files(res.snapshot_id)
+        self.assertEqual(res.files, len(self.files))
+        self.assertFalse(any(p.startswith((".git", "node_modules")) for p in recs))
+        # 不传 excludes 时行为不变：默认扫描全部目录
+        res2 = run_scan(self.db, self.pid)
+        recs2 = self._snapshot_files(res2.snapshot_id)
+        self.assertEqual(len(recs2), len(self.files) + 2)
+        self.assertTrue(any(p.startswith(".git") for p in recs2))
+
     def test_readonly_guarantee(self):
         before = {p: (p.stat().st_mtime_ns, p.stat().st_size, hashlib.sha256(p.read_bytes()).hexdigest())
                   for p in self.root.rglob("*") if p.is_file()}

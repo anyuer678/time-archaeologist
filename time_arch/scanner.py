@@ -65,12 +65,15 @@ def _is_junction(entry) -> bool:
 
 
 def iter_files(root: str, cancel_event: threading.Event | None,
-               on_error: Callable[[str, str], None]) -> Iterator[dict]:
+               on_error: Callable[[str, str], None],
+               excludes: set[str] | None = None) -> Iterator[dict]:
     """迭代目录树中的文件（含符号链接记录，不跟随目录链接避免循环）。
 
+    excludes：按名称跳过的目录/文件（大小写不敏感，任意深度），如 .git、node_modules。
     yields: {rel_path, abs_path, size, mtime, ext, category, is_symlink, link_target}
     """
     sep = os.sep
+    excluded = {e.lower() for e in (excludes or set())}
     stack: list[tuple[str, str]] = [(root, "")]
     while stack:
         cur_abs, cur_rel = stack.pop()
@@ -84,6 +87,8 @@ def iter_files(root: str, cancel_event: threading.Event | None,
             if cancel_event is not None and cancel_event.is_set():
                 raise ScanCancelled()
             name = sanitize_text(entry.name)
+            if excluded and name.lower() in excluded:
+                continue
             abs_path = os.path.join(cur_abs, entry.name)
             rel_path = sanitize_text(f"{cur_rel}{sep}{name}" if cur_rel else name)
             try:
@@ -232,7 +237,8 @@ def build_events_from_diff(db: Database, project_id: int, run_id: int,
 def run_scan(db: Database, project_id: int,
              cancel_event: threading.Event | None = None,
              progress_cb: Callable[[ScanProgress], None] | None = None,
-             analyze: bool = True) -> ScanResult:
+             analyze: bool = True,
+             excludes: set[str] | None = None) -> ScanResult:
     """同步执行一次完整扫描（测试与后台线程共用）。
 
     增量哈希：与上一次完成快照相比 size+mtime 均未变的文件，直接复用当时的
@@ -276,7 +282,7 @@ def run_scan(db: Database, project_id: int,
             })
 
     try:
-        for info in iter_files(root, cancel_event, on_error):
+        for info in iter_files(root, cancel_event, on_error, excludes):
             if cancel_event is not None and cancel_event.is_set():
                 raise ScanCancelled()
             sha, read_err = None, None

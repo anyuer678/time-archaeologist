@@ -66,6 +66,15 @@ class CliTest(unittest.TestCase):
         code, out, _ = self.run_cli("leads", "proj")
         self.assertEqual(code, 0)
 
+    def test_scan_exclude(self):
+        (self.root / ".git" / "objects").mkdir(parents=True)
+        (self.root / ".git" / "objects" / "aa").write_text("x", encoding="utf-8")
+        data = self.scan()  # 默认包含 .git
+        self.assertEqual(data["files"], len(FILES) + 1)
+        code, out, err = self.run_cli("scan", str(self.root), "--exclude", ".git", "--json")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["files"], len(FILES))
+
     def test_analyze_lists_and_exports(self):
         self.scan()
         code, out, err = self.run_cli("analyze", "proj", "--json")

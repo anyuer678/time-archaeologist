@@ -116,9 +116,14 @@ def cmd_scan(db: Database, args) -> int:
     if not os.path.isdir(root):
         raise CliError(f"目录不存在或不可访问：{root}")
     pid, created = db.add_project(root, args.name)
+    excludes: set[str] = set()
+    for raw in args.exclude or []:
+        excludes.update(x.strip().lower() for x in raw.split(",") if x.strip())
     if not args.json:
         print(f"{'已登记' if created else '已存在'}项目 #{pid}"
               f"「{db.get_project(pid)['name']}」")
+        if excludes:
+            print(f"按名称跳过：{', '.join(sorted(excludes))}")
     progress = None
     if args.progress and not args.json:
         last = [0.0]
@@ -129,7 +134,8 @@ def cmd_scan(db: Database, args) -> int:
                 last[0] = now
                 print(f"  扫描中：{p.files} 个文件 · {p.bytes_hashed} 字节已哈希"
                       f" · {p.errors} 个错误", file=sys.stderr)
-    result = run_scan(db, pid, progress_cb=progress, analyze=not args.no_analyze)
+    result = run_scan(db, pid, progress_cb=progress, analyze=not args.no_analyze,
+                      excludes=excludes or None)
     if result.status != "completed":
         detail = "；".join(result.error_messages[:3]) or result.status
         raise CliError(f"扫描未完成（{result.status}）：{detail}")
@@ -403,6 +409,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--name")
     p.add_argument("--no-analyze", action="store_true", help="只扫描，不做成果启发式")
     p.add_argument("--progress", action="store_true", help="每秒输出一行扫描进度到 stderr")
+    p.add_argument("--exclude", action="append", metavar="NAME",
+                   help="按名称跳过目录/文件（可多次或逗号分隔），如 .git,node_modules")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_scan)
 
