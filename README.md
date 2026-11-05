@@ -20,6 +20,26 @@ python run_app.py        # 或 python -m time_arch
 
 也可以直接双击目录下的 `启动时光考古机.bat`（找不到 Python 时会提示）。
 
+### 无头命令行（可选）
+
+不启动图形界面，直接扫描/分析/导出（与 GUI 共用同一套只读 API）：
+
+```bash
+python -m time_arch projects                          # 列出已登记项目
+python -m time_arch scan <目录> [--name 名称]          # 登记并扫描（默认同时做成果启发式）
+python -m time_arch analyze <项目ID或路径>             # 关系/线索/档案/任务/阶段建议
+python -m time_arch report <项目> -o 报告.md           # v0.1.0 报告（--format json 亦可）
+python -m time_arch leads <项目> [--status open]      # 调查线索（--json 机读）
+python -m time_arch dossiers <项目> [--json]          # 成果档案
+python -m time_arch repro <项目> <目标文件> --export 复现报告.md
+python -m time_arch tasks <项目> [--export 任务清单.md]
+python -m time_arch timeline <项目> -o 时间线.md
+python -m time_arch diff <项目>                       # 最近两次完成快照对比
+```
+
+`--db <路径>` 放在子命令之前可指定数据库；不带子命令时仍启动 GUI。
+退出码：0 成功，2 参数/项目/快照问题，1 运行时异常。命令行与 GUI 一样只读、不执行项目内程序。
+
 ## 使用说明
 
 **基本流程：**
@@ -92,7 +112,7 @@ python run_app.py        # 或 python -m time_arch
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（121 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（126 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -126,6 +146,9 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
 - 2.0 页签冒烟（2026-11-05）：`scripts/ui_smoke_2.py` 7/7 通过——成果档案生成/列表/详情/
   人工确认-否决-恢复自动；复现检查运行（demo_lab exp03，B 级 9 项）、评分规则常显、
   历史载入、报告导出、空目标校验。原有 v0.1.0 冒烟 16/16 无回归。
+- 无头 CLI（2026-11-05）：`tests/test_cli.py` 5 项通过——扫描与项目解析（#ID/路径/名称）、
+  分析汇总、线索/档案/任务列表、时间线与报告导出、复现检查与报告导出、双快照对比、
+  错误退出码；并已用 `scripts/demo_lab` 实跑 scan→analyze→leads→repro→dossiers 全链路。
 - 2.0 端到端验收 `19/19 PASS`（两个真实目录）：项目 A = 本仓库自身源码（软件项目，
   262 文件：57 关系边、反向追踪 40 节点、14 线索、12 档案、7 阶段片段、14 任务，重跑幂等）；
   项目 B = 仓库自带实验布局样例 `scripts/demo_lab`（真实磁盘文件，开发期构建的固定样例，
@@ -152,6 +175,7 @@ time_arch/
 ├── investigate.py 2.0 调查规则引擎（8 条规则，版本号 + 可启停）
 ├── phases.py    2.0 演化阶段 / 里程碑（机器建议与人工确认分开存档）
 ├── tasks.py     2.0 调查任务生成（由真实线索派生，人工确认完成）
+├── cli.py       无头命令行（projects/scan/analyze/report/leads/dossiers/repro/tasks/timeline/diff）
 ├── reports.py   Markdown / JSON 报告导出
 ├── util.py      时间/路径/长路径前缀等工具
 └── ui/          Tkinter 深色界面（theme.py 主题 + app.py 主窗口，九页签）
