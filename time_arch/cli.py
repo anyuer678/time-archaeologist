@@ -24,6 +24,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 
 from . import __version__
 from .db import Database
@@ -37,7 +38,7 @@ from .reports import build_json, build_markdown, export_report
 from .repro import LEVEL_LABELS, build_repro_report, run_repro_check
 from .scanner import run_scan
 from .tasks import TASK_STATUS, export_tasks_markdown, generate_tasks, task_view
-from .util import default_db_path
+from .util import default_db_path, utcnow_iso
 
 LEAD_STATUS_LABELS = {"open": "待查看", "acknowledged": "已知悉", "dismissed": "已忽略"}
 
@@ -118,7 +119,17 @@ def cmd_scan(db: Database, args) -> int:
     if not args.json:
         print(f"{'已登记' if created else '已存在'}项目 #{pid}"
               f"「{db.get_project(pid)['name']}」")
-    result = run_scan(db, pid, analyze=not args.no_analyze)
+    progress = None
+    if args.progress and not args.json:
+        last = [0.0]
+
+        def progress(p):  # 每秒最多一行，避免刷屏
+            now = time.time()
+            if now - last[0] >= 1.0:
+                last[0] = now
+                print(f"  扫描中：{p.files} 个文件 · {p.bytes_hashed} 字节已哈希"
+                      f" · {p.errors} 个错误", file=sys.stderr)
+    result = run_scan(db, pid, progress_cb=progress, analyze=not args.no_analyze)
     if result.status != "completed":
         detail = "；".join(result.error_messages[:3]) or result.status
         raise CliError(f"扫描未完成（{result.status}）：{detail}")
@@ -190,6 +201,18 @@ def cmd_report(db: Database, args) -> int:
 
 def cmd_leads(db: Database, args) -> int:
     p = _resolve_project(db, args.project)
+    if args.set_status:
+        raw_id, status = args.set_status
+        if status not in LEAD_STATUS_LABELS:
+            raise CliError(f"未知状态：{status}（可选：open/acknowledged/dismissed）")
+        lid = int(raw_id) if raw_id.isdigit() else -1
+        row = db.query("SELECT id FROM leads WHERE id=? AND project_id=?",
+                       (lid, p["id"]))
+        if not row:
+            raise CliError(f"线索 #{raw_id} 不存在或不属于该项目")
+        db.set_lead_status(lid, status)
+        print(f"线索 #{lid} 状态已设为：{LEAD_STATUS_LABELS[status]}")
+        return 0
     rows = db.list_leads(p["id"], rule_id=args.rule, status=args.status, limit=10000)
     if args.json:
         _json_out([_parse_json_fields(dict(r), ("evidence", "details")) for r in rows])
@@ -246,6 +269,21 @@ def cmd_repro(db: Database, args) -> int:
 
 def cmd_tasks(db: Database, args) -> int:
     p = _resolve_project(db, args.project)
+    actions = [("done", args.complete), ("open", args.reopen),
+               ("dismissed", args.dismiss)]
+    chosen = [(status, tid) for status, tid in actions if tid is not None]
+    if chosen:
+        if len(chosen) != 1:
+            raise CliError("--complete / --reopen / --dismiss 一次只能指定一个")
+        status, tid = chosen[0]
+        row = db.query("SELECT id FROM tasks WHERE id=? AND project_id=?",
+                       (tid, p["id"]))
+        if not row:
+            raise CliError(f"任务 #{tid} 不存在或不属于该项目")
+        db.set_task_status(tid, status, utcnow_iso())
+        note = "（仅表示你本人已完成调查并确认结论）" if status == "done" else ""
+        print(f"任务 #{tid} 状态已设为：{TASK_STATUS.get(status, status)}{note}")
+        return 0
     if args.export:
         r = export_tasks_markdown(db, p["id"], args.export)
         print(f"任务清单已导出：{r['path']}（{r['tasks']} 项，待处理 {r['open']} 项）")
@@ -359,6 +397,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("path")
     p.add_argument("--name")
     p.add_argument("--no-analyze", action="store_true", help="只扫描，不做成果启发式")
+    p.add_argument("--progress", action="store_true", help="每秒输出一行扫描进度到 stderr")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_scan)
 
@@ -378,10 +417,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--out")
     p.set_defaults(func=cmd_report)
 
-    p = sub.add_parser("leads", help="列出调查线索")
+    p = sub.add_parser("leads", help="列出调查线索或变更其状态")
     p.add_argument("project")
     p.add_argument("--status", choices=["open", "acknowledged", "dismissed"])
     p.add_argument("--rule")
+    p.add_argument("--set-status", nargs=2, metavar=("ID", "STATUS"),
+                   help="变更单条线索状态（人工操作）：open/acknowledged/dismissed")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_leads)
 
@@ -398,10 +439,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_repro)
 
-    p = sub.add_parser("tasks", help="列出或导出调查任务")
+    p = sub.add_parser("tasks", help="列出/导出调查任务，或人工变更状态")
     p.add_argument("project")
     p.add_argument("--status", choices=["open", "done", "dismissed"])
     p.add_argument("--export", help="导出 Markdown 任务清单到该路径")
+    p.add_argument("--complete", type=int, metavar="ID",
+                   help="人工确认完成（仅由你本人确认，系统不执行任务）")
+    p.add_argument("--reopen", type=int, metavar="ID", help="重新打开任务")
+    p.add_argument("--dismiss", type=int, metavar="ID", help="忽略任务")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_tasks)
 

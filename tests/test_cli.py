@@ -156,6 +156,44 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("至少指定", err)
 
+    def test_status_actions(self):
+        self.scan()
+        self.run_cli("analyze", "proj")
+        db = Database(self.db_path)
+        leads = db.list_leads(1)
+        self.assertTrue(leads)
+        lid = leads[0]["id"]
+        code, out, err = self.run_cli("leads", "proj", "--set-status",
+                                      str(lid), "acknowledged")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(db.query("SELECT status FROM leads WHERE id=?",
+                                  (lid,))[0][0], "acknowledged")
+        code, out, err = self.run_cli("leads", "proj", "--set-status", str(lid), "bogus")
+        self.assertEqual(code, 2)
+        self.assertIn("未知状态", err)
+
+        tasks = db.list_tasks(1)
+        self.assertTrue(tasks)
+        tid = tasks[0]["id"]
+        code, out, err = self.run_cli("tasks", "proj", "--complete", str(tid))
+        self.assertEqual(code, 0, err)
+        row = db.query("SELECT status, completed_at FROM tasks WHERE id=?", (tid,))[0]
+        self.assertEqual(row["status"], "done")
+        self.assertTrue(row["completed_at"])
+        code, out, err = self.run_cli("tasks", "proj", "--reopen", str(tid))
+        self.assertEqual(code, 0, err)
+        row = db.query("SELECT status, completed_at FROM tasks WHERE id=?", (tid,))[0]
+        self.assertEqual(row["status"], "open")
+        self.assertIsNone(row["completed_at"])
+
+        code, out, err = self.run_cli("tasks", "proj", "--complete", str(tid),
+                                      "--reopen", str(tid))
+        self.assertEqual(code, 2)
+        self.assertIn("只能指定一个", err)
+        code, out, err = self.run_cli("tasks", "proj", "--complete", "99999")
+        self.assertEqual(code, 2)
+        self.assertIn("不存在", err)
+
     def test_error_codes(self):
         code, out, err = self.run_cli("scan", str(Path(self.tmp.name) / "missing"))
         self.assertEqual(code, 2)

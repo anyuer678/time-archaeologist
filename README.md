@@ -27,7 +27,10 @@ python run_app.py        # 或 python -m time_arch
 ```bash
 python -m time_arch projects                          # 列出已登记项目
 python -m time_arch scan <目录> [--name 名称]          # 登记并扫描（默认同时做成果启发式）
+python -m time_arch scan <目录> --progress             # 长扫描时每秒输出进度到 stderr
 python -m time_arch analyze <项目ID或路径>             # 关系/线索/档案/任务/阶段建议
+python -m time_arch leads <项目> --set-status 12 acknowledged   # 人工变更线索状态
+python -m time_arch tasks <项目> --complete 5          # 人工确认完成（--reopen/--dismiss 可撤销）
 python -m time_arch report <项目> -o 报告.md           # v0.1.0 报告（--format json 亦可）
 python -m time_arch leads <项目> [--status open]      # 调查线索（--json 机读）
 python -m time_arch dossiers <项目> [--json]          # 成果档案
@@ -40,7 +43,8 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 ```
 
 `--db <路径>` 放在子命令之前可指定数据库；不带子命令时仍启动 GUI。
-退出码：0 成功，2 参数/项目/快照问题，1 运行时异常。命令行与 GUI 一样只读、不执行项目内程序。
+退出码：0 成功，2 参数/项目/快照问题，1 运行时异常。命令行与 GUI 一样只读、不执行项目内程序；
+任务「完成」与线索状态变更只由你在命令行显式执行，系统不会自动完成或伪造结果。
 
 ## 使用说明
 
@@ -120,7 +124,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（132 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（133 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -154,10 +158,10 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
 - 2.0 页签冒烟（2026-11-05）：`scripts/ui_smoke_2.py` 8/8 通过——成果档案生成/列表/详情/
   人工确认-否决-恢复自动；复现检查运行（demo_lab exp03，B 级 9 项）、评分规则常显、
   历史载入、复现报告导出、完整取证报告导出、空目标校验。原有 v0.1.0 冒烟 16/16 无回归。
-- 无头 CLI（2026-11-05）：`tests/test_cli.py` 6 项通过——扫描与项目解析（#ID/路径/名称）、
+- 无头 CLI（2026-11-05）：`tests/test_cli.py` 7 项通过——扫描与项目解析（#ID/路径/名称）、
   分析汇总、线索/档案/任务列表、时间线/报告/取证报告导出、复现检查与报告导出、
-  双快照对比、数据库完整性检查/在线备份/压缩、错误退出码；并已用 `scripts/demo_lab`
-  实跑 scan→analyze→leads→repro→dossiers 全链路。
+  双快照对比、数据库完整性检查/在线备份/压缩、人工状态变更（线索状态/任务完成与重开）、
+  错误退出码；并已用 `scripts/demo_lab` 实跑 scan→analyze→leads→repro→dossiers 全链路。
 - 完整取证报告（2026-11-05）：`tests/test_forensics.py` 4 项通过——章节齐全、诚实边界声明、
   档案/线索/任务/复现/阶段内容、无扫描项目可构建、导出与重跑确定性、快照范围与错误处理。
 - 发布包成员核对（2026-11-05）：成果档案只读读取 zip 中央目录——真实包列出成员并写入
