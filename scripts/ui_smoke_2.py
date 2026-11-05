@@ -102,6 +102,15 @@ def main() -> int:
                 and "逐项检查" in text)
         print(f"PASS | 复现报告导出 · {len(text)} 字符")
 
+        fs = os.path.join(tmpdir, "forensics.md")
+        fd.asksaveasfilename = lambda *a, **k: fs
+        app.on_export_forensics()
+        assert os.path.exists(fs)
+        ftext = open(fs, encoding="utf-8").read()
+        assert ("# 项目取证报告" in ftext and "## 二、成果档案" in ftext
+                and "## 五、复现检查" in ftext and "评分规则（完全公开）" in ftext)
+        print(f"PASS | 完整取证报告导出 · {len(ftext)} 字符")
+
         shown = []
         mb.showinfo = lambda title, msg, **k: shown.append(msg)
         app.rp_target.set("")

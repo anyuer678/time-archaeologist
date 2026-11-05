@@ -102,6 +102,14 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("调查任务清单", tasks_md.read_text(encoding="utf-8"))
 
+        forensics = Path(self.tmp.name) / "forensics.md"
+        code, out, err = self.run_cli("forensics", "proj", "-o", str(forensics))
+        self.assertEqual(code, 0, err)
+        text = forensics.read_text(encoding="utf-8")
+        self.assertIn("# 项目取证报告", text)
+        self.assertIn("## 二、成果档案", text)
+        self.assertIn("## 四、调查任务", text)
+
     def test_repro_check_and_export(self):
         self.scan()
         report = Path(self.tmp.name) / "repro.md"

@@ -10,6 +10,7 @@
   python -m time_arch repro <项目> <目标文件> [--export 报告.md] [--json]
   python -m time_arch tasks <项目> [--status open] [--export 清单.md]
   python -m time_arch timeline <项目> [-o 时间线.md]
+  python -m time_arch forensics <项目> [-o 取证报告.md]
   python -m time_arch diff <项目> [--json]
 
 所有分析均为只读：不执行被扫描目录中的任何程序、不联网。
@@ -26,6 +27,7 @@ import tempfile
 from . import __version__
 from .db import Database
 from .dossier import dossier_view, run_dossier_analysis
+from .forensics import build_forensics_markdown, export_forensics_markdown
 from .graph import run_relation_analysis
 from .investigate import RULE_LABELS, run_lead_analysis
 from .phases import (persist_milestone_suggestions, suggest_milestones,
@@ -282,6 +284,16 @@ def cmd_timeline(db: Database, args) -> int:
     return 0
 
 
+def cmd_forensics(db: Database, args) -> int:
+    p = _resolve_project(db, args.project)
+    if args.out:
+        export_forensics_markdown(db, p["id"], args.out, args.snapshot)
+        print(f"取证报告已导出：{args.out}")
+    else:
+        sys.stdout.write(build_forensics_markdown(db, p["id"], args.snapshot))
+    return 0
+
+
 def cmd_diff(db: Database, args) -> int:
     p = _resolve_project(db, args.project)
     latest = _snapshot(db, p["id"], args.snapshot)
@@ -373,6 +385,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("project")
     p.add_argument("-o", "--out")
     p.set_defaults(func=cmd_timeline)
+
+    p = sub.add_parser("forensics", help="导出完整取证报告（档案/线索/任务/复现/阶段）")
+    p.add_argument("project")
+    p.add_argument("-o", "--out", help="默认输出到标准输出")
+    p.add_argument("--snapshot", type=int)
+    p.set_defaults(func=cmd_forensics)
 
     p = sub.add_parser("diff", help="对比最近两次完成的快照")
     p.add_argument("project")

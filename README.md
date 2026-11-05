@@ -34,6 +34,7 @@ python -m time_arch dossiers <项目> [--json]          # 成果档案
 python -m time_arch repro <项目> <目标文件> --export 复现报告.md
 python -m time_arch tasks <项目> [--export 任务清单.md]
 python -m time_arch timeline <项目> -o 时间线.md
+python -m time_arch forensics <项目> -o 取证报告.md      # 2.0 完整取证报告
 python -m time_arch diff <项目>                       # 最近两次完成快照对比
 ```
 
@@ -70,7 +71,9 @@ python -m time_arch diff <项目>                       # 最近两次完成快�
    - **快照对比**：任选两次完成的扫描，列出新增 / 删除 / 修改文件清单。
 4. **追溯证据**：任何事件或成果线索**双击**即可查看证据链——判断依据、涉及快照、
    关联文件记录（大小 / mtime / SHA-256 / 类别）；查不到文件记录时明确显示"证据不足"。
-5. **导出报告**：右上角「导出报告」，选 Markdown（人读）或 JSON（机读）。
+5. **导出报告**：右上角「导出报告」选 Markdown（人读）或 JSON（机读）；
+   「导出取证报告」把 2.0 的成果档案、调查线索、任务、复现检查、阶段与里程碑
+   汇总为一份可提交的 Markdown（全部来自库内记录，附诚实边界声明）。
 
 **如何看懂确定性标记：**
 
@@ -105,6 +108,9 @@ python -m time_arch diff <项目>                       # 最近两次完成快�
 - **演化图谱**：关系边带 `source`（规则名）与 `confidence`，低置信度明确标注为推测；
   依据可查（哪条规则、什么内容触发的判断）。
 - **演化阶段与里程碑**：机器建议与人工确认分开存档；阶段模型是可选假设，不强行套用。
+- **完整取证报告**：一键把成果档案、调查线索、任务、复现检查、阶段与里程碑汇总为
+  一份 Markdown（GUI 右上角「导出取证报告」或 CLI `forensics`），全部来自库内记录，
+  并附 mtime 声明、启发式标注与缺失证据说明。
 
 诚实边界：文件系统只能还原部分历史；mtime 不等于工作时长；所有自动判断均附证据来源，
 误报/漏报/无法判断都有明确的表达方式（线索的「误报可能性」、复现检查的 B/C/D 级）。
@@ -112,7 +118,7 @@ python -m time_arch diff <项目>                       # 最近两次完成快�
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（126 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（130 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -143,12 +149,14 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
   与 v5→v6 迁移等测试模块；含每条规则的正例、反例、边界与只读验证命令守卫）。
 - UI 冒烟：真实 Tk + 真实仓库全链路（线索→任务→图谱追踪→阶段确认→里程碑→任务人工确认/
   筛选/手动添加/导出）全部通过。
-- 2.0 页签冒烟（2026-11-05）：`scripts/ui_smoke_2.py` 7/7 通过——成果档案生成/列表/详情/
+- 2.0 页签冒烟（2026-11-05）：`scripts/ui_smoke_2.py` 8/8 通过——成果档案生成/列表/详情/
   人工确认-否决-恢复自动；复现检查运行（demo_lab exp03，B 级 9 项）、评分规则常显、
-  历史载入、报告导出、空目标校验。原有 v0.1.0 冒烟 16/16 无回归。
+  历史载入、复现报告导出、完整取证报告导出、空目标校验。原有 v0.1.0 冒烟 16/16 无回归。
 - 无头 CLI（2026-11-05）：`tests/test_cli.py` 5 项通过——扫描与项目解析（#ID/路径/名称）、
-  分析汇总、线索/档案/任务列表、时间线与报告导出、复现检查与报告导出、双快照对比、
-  错误退出码；并已用 `scripts/demo_lab` 实跑 scan→analyze→leads→repro→dossiers 全链路。
+  分析汇总、线索/档案/任务列表、时间线/报告/取证报告导出、复现检查与报告导出、
+  双快照对比、错误退出码；并已用 `scripts/demo_lab` 实跑 scan→analyze→leads→repro→dossiers 全链路。
+- 完整取证报告（2026-11-05）：`tests/test_forensics.py` 4 项通过——章节齐全、诚实边界声明、
+  档案/线索/任务/复现/阶段内容、无扫描项目可构建、导出与重跑确定性、快照范围与错误处理。
 - 2.0 端到端验收 `19/19 PASS`（两个真实目录）：项目 A = 本仓库自身源码（软件项目，
   262 文件：57 关系边、反向追踪 40 节点、14 线索、12 档案、7 阶段片段、14 任务，重跑幂等）；
   项目 B = 仓库自带实验布局样例 `scripts/demo_lab`（真实磁盘文件，开发期构建的固定样例，
@@ -175,7 +183,8 @@ time_arch/
 ├── investigate.py 2.0 调查规则引擎（8 条规则，版本号 + 可启停）
 ├── phases.py    2.0 演化阶段 / 里程碑（机器建议与人工确认分开存档）
 ├── tasks.py     2.0 调查任务生成（由真实线索派生，人工确认完成）
-├── cli.py       无头命令行（projects/scan/analyze/report/leads/dossiers/repro/tasks/timeline/diff）
+├── forensics.py 2.0 完整取证报告（档案/线索/任务/复现/阶段汇总为 Markdown）
+├── cli.py       无头命令行（projects/scan/analyze/report/leads/dossiers/repro/tasks/timeline/forensics/diff）
 ├── reports.py   Markdown / JSON 报告导出
 ├── util.py      时间/路径/长路径前缀等工具
 └── ui/          Tkinter 深色界面（theme.py 主题 + app.py 主窗口，九页签）

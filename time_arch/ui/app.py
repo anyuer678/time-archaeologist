@@ -17,6 +17,7 @@ from ..analyze import KIND_LABELS
 from ..classify import CATEGORY_LABELS
 from ..db import Database
 from ..dossier import ARTIFACT_KINDS, ROLE_LABELS, dossier_view, run_dossier_analysis
+from ..forensics import export_forensics_markdown
 from ..graph import (RELATION_LABELS, RULES as GRAPH_RULES,
                      RULE_LABELS as GRAPH_RULE_LABELS,
                      run_relation_analysis, trace_relations)
@@ -86,6 +87,8 @@ class App:
         ttk.Label(top, text="  只读扫描 · 证据可溯 · 推测与事实分明",
                   style="Dim.TLabel").pack(side="left", padx=8)
         ttk.Button(top, text="导出报告…", command=self.on_export).pack(side="right")
+        ttk.Button(top, text="导出取证报告…", command=self.on_export_forensics
+                   ).pack(side="right", padx=(0, 6))
 
         body = ttk.Frame(self.root)
         body.pack(fill="both", expand=True, padx=10, pady=8)
@@ -1969,6 +1972,30 @@ class App:
             messagebox.showerror("导出失败", str(e), parent=self.root)
             return
         messagebox.showinfo("导出完成", f"报告已保存：\n{path}", parent=self.root)
+
+    def on_export_forensics(self) -> None:
+        if self.selected_project_id is None:
+            messagebox.showinfo("提示", "请先选择一个项目。", parent=self.root)
+            return
+        latest = self.db.latest_snapshot(self.selected_project_id)
+        if latest is None:
+            messagebox.showinfo("提示", "该项目还没有完成的扫描快照，请先执行扫描。",
+                                parent=self.root)
+            return
+        p = self.db.get_project(self.selected_project_id)
+        path = filedialog.asksaveasfilename(
+            title="导出完整取证报告", defaultextension=".md",
+            initialfile=f"{p['name']}_取证报告.md",
+            filetypes=[("Markdown", "*.md"), ("所有文件", "*.*")],
+            parent=self.root)
+        if not path:
+            return
+        try:
+            export_forensics_markdown(self.db, self.selected_project_id, path)
+        except OSError as e:
+            messagebox.showerror("导出失败", str(e), parent=self.root)
+            return
+        messagebox.showinfo("导出完成", f"取证报告已保存：\n{path}", parent=self.root)
 
     # ---------------------------------------------------------------- 关闭
     def _on_close(self) -> None:
