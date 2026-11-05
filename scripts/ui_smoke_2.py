@@ -39,18 +39,23 @@ def main() -> int:
         app.refresh_all_tabs()
         root.update()
 
-        # ---- 成果档案：生成 -> 列表 -> 详情 -> 人工状态 ----
-        app.on_analyze_artifacts()
-        deadline = time.time() + 15
+        # ---- 一键分析：关系 -> 线索 -> 档案 -> 任务 ----
+        app.on_analyze_all()
+        deadline = time.time() + 20
         while time.time() < deadline:
             root.update()
-            if not app._dossiers_running and app.art_tree.get_children():
+            if not app._full_analyzing and app.art_tree.get_children():
                 break
             time.sleep(0.02)
         root.update()
+        assert not app._full_analyzing
+        assert app.ld_tree.get_children(), "线索页签为空"
+        assert app.tk_tree.get_children(), "任务页签为空"
+        print(f"PASS | 一键分析（关系/线索/档案/任务）· {app.scan_label_var.get()}")
+
         n_art = len(app.art_tree.get_children())
         assert n_art > 0, "成果档案列表为空"
-        print(f"PASS | 成果档案生成并列出 · {n_art} 份")
+        print(f"PASS | 成果档案列出 · {n_art} 份")
 
         first = app.art_tree.get_children()[0]
         app.art_tree.selection_set(first)

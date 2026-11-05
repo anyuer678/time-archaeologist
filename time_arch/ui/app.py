@@ -58,6 +58,7 @@ class App:
         self._snap_map: dict[int, dict] = {}
         self._leads_running = False
         self._dossiers_running = False
+        self._full_analyzing = False
         self._relations_running = False
         self._phases_running = False
         self._art_rows: dict[int, dict] = {}
@@ -89,6 +90,8 @@ class App:
         ttk.Button(top, text="导出报告…", command=self.on_export).pack(side="right")
         ttk.Button(top, text="导出取证报告…", command=self.on_export_forensics
                    ).pack(side="right", padx=(0, 6))
+        ttk.Button(top, text="一键分析（2.0）", style="Accent.TButton",
+                   command=self.on_analyze_all).pack(side="right", padx=(0, 6))
 
         body = ttk.Frame(self.root)
         body.pack(fill="both", expand=True, padx=10, pady=8)
@@ -753,6 +756,10 @@ class App:
                     self._handle_dossiers_done(payload)
                 elif kind == "dossiers_error":
                     self._handle_dossiers_error(payload)
+                elif kind == "analyze_all_done":
+                    self._handle_analyze_all_done(payload)
+                elif kind == "analyze_all_error":
+                    self._handle_analyze_all_error(payload)
                 elif kind == "relations_done":
                     self._handle_relations_done(payload)
                 elif kind == "relations_error":
@@ -1022,6 +1029,57 @@ class App:
         self._dossiers_running = False
         self.art_info.set("成果档案分析出错。")
         messagebox.showerror("成果档案分析失败", msg, parent=self.root)
+
+    # ---------------------------------------------------------------- 一键分析
+    def on_analyze_all(self) -> None:
+        if self._full_analyzing:
+            messagebox.showinfo("提示", "一键分析正在进行。", parent=self.root)
+            return
+        if self.service.busy or self._scan_running:
+            messagebox.showinfo("提示", "扫描进行中，请等待扫描完成后再分析。",
+                                parent=self.root)
+            return
+        pid = self.selected_project_id
+        if pid is None:
+            messagebox.showinfo("提示", "请先在左侧选择一个项目。", parent=self.root)
+            return
+        latest = self.db.latest_snapshot(pid)
+        if latest is None:
+            messagebox.showinfo("提示", "该项目还没有完成的扫描快照，请先执行扫描。",
+                                parent=self.root)
+            return
+        self._full_analyzing = True
+        self.scan_label_var.set("一键分析中：关系 → 线索 → 成果档案 → 任务…")
+
+        def work():
+            try:
+                summary = {
+                    "snapshot_id": latest["id"],
+                    "relations": run_relation_analysis(self.db, pid, latest["id"])["edges"],
+                    "leads": run_lead_analysis(self.db, pid, latest["id"])["leads"],
+                    "dossiers": run_dossier_analysis(self.db, pid, latest["id"])["total"],
+                }
+                t = generate_tasks(self.db, pid, latest["id"])
+                summary.update({"tasks_created": t["created"], "tasks_total": t["total"]})
+            except Exception as e:
+                self.scan_queue.put(("analyze_all_error", str(e)))
+            else:
+                self.scan_queue.put(("analyze_all_done", summary))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _handle_analyze_all_done(self, s: dict) -> None:
+        self._full_analyzing = False
+        self.scan_label_var.set(
+            f"一键分析完成（快照 #{s['snapshot_id']}）：关系 {s['relations']} 边 · "
+            f"线索 {s['leads']} 条 · 档案 {s['dossiers']} 份 · "
+            f"任务新建 {s['tasks_created']}（共 {s['tasks_total']}）")
+        self.refresh_all_tabs()
+
+    def _handle_analyze_all_error(self, msg: str) -> None:
+        self._full_analyzing = False
+        self.scan_label_var.set("一键分析出错。")
+        messagebox.showerror("一键分析失败", msg, parent=self.root)
 
     def _set_artifact(self, status: str) -> None:
         sel = self.art_tree.selection()
