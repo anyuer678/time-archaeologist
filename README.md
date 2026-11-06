@@ -41,6 +41,7 @@ python -m time_arch projects                          # 列出已登记项目
 python -m time_arch overview [--json]                 # 跨项目摘要（线索/任务/档案数量）
 python -m time_arch rules [--enable RULE_ID] [--disable RULE_ID]  # 调查规则启停
 python -m time_arch config <项目> --excludes .git,node_modules   # 项目级排除（GUI 同项）
+python -m time_arch config <项目> --name 新名称         # 重命名项目（仅本机库）
 python -m time_arch config <项目> --clear              # 清空排除设置
 python -m time_arch scan <目录> [--name 名称]          # 登记并扫描（默认同时做成果启发式）
 python -m time_arch scan <目录> --progress             # 长扫描时每秒输出进度到 stderr
@@ -74,6 +75,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 1. **登记项目**：左侧「登记项目」选择要考古的目录（只读，不会动里面任何文件），登记后可立即扫描。
    可点「扫描选项…」按名称或通配符跳过 `.git`、`node_modules`、`*.log` 等
    （逗号分隔，留空=扫描全部）。
+   点「重命名项目…」可修改显示名称（只改本机库，不改磁盘目录名）。
    点「全部项目摘要…」可查看各项目最新快照、待查看线索、待处理任务与档案数量。
    点「数据库维护…」可做完整性检查、在线备份与 VACUUM 压缩（只影响本机数据库）。
 2. **扫描**：选中项目后点「重新扫描」。顶部扫描状态条实时显示已扫描文件数、已哈希体积、
@@ -152,7 +154,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（150 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（152 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -183,19 +185,19 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
   v0.1.0→v7 与 v5→v7 迁移等测试模块；含每条规则的正例、反例、边界与只读验证命令守卫）。
 - UI 冒烟：真实 Tk + 真实仓库全链路（线索→任务→图谱追踪→阶段确认→里程碑→任务人工确认/
   筛选/手动添加/导出）全部通过。
-- 2.0 页签冒烟（2026-11-05/06）：`scripts/ui_smoke_2.py` 13/13 通过——一键分析（关系→线索→
+- 2.0 页签冒烟（2026-11-05/06）：`scripts/ui_smoke_2.py` 14/14 通过——一键分析（关系→线索→
   档案→任务）并刷新页签；成果档案列表/详情/人工确认-否决-恢复自动；复现检查运行
   （demo_lab exp03，B 级 9 项）、评分规则常显、历史载入、复现报告导出、完整取证报告导出、
-  事件 CSV 导出、项目级扫描排除保存并传入扫描服务、全部项目摘要对话框、
+  事件 CSV 导出、项目级扫描排除保存并传入扫描服务、项目重命名、全部项目摘要对话框、
   数据库完整性/备份/压缩、空目标校验。原有 v0.1.0 冒烟 16/16 无回归。
-- 无头 CLI（2026-11-05/06）：`tests/test_cli.py` 15 项通过——扫描（`--exclude`、项目级
+- 无头 CLI（2026-11-05/06）：`tests/test_cli.py` 16 项通过——扫描（`--exclude`、项目级
   `config` 排除）与项目解析（#ID/路径/名称）、跨项目 `overview`、`rules` 启停、
-  里程碑保存/确认/删除、阶段建议查看与自定义阶段增删、分析汇总、
+  项目重命名、里程碑保存/确认/删除、阶段建议查看与自定义阶段增删、分析汇总、
   线索/档案/任务列表与详情、复现检查运行/历史/载入/导出、
-  时间线 Markdown / 事件 CSV / 报告 / 取证报告导出、双快照对比与 Markdown 对比导出、
-  数据库完整性检查/在线备份/压缩、人工状态变更（线索状态/任务完成与重开）、
-  模块入口路由（`--version`/`--help` 不启动 GUI）、错误退出码；
-  并已用 `scripts/demo_lab` 实跑 scan→analyze→leads→repro→dossiers 全链路。
+  时间线 Markdown / 事件 CSV / 报告 / 取证报告（Markdown+JSON）导出、
+  双快照对比与 Markdown 对比导出、数据库完整性检查/在线备份/压缩、
+  人工状态变更（线索状态/任务完成与重开）、模块入口路由（`--version`/`--help` 不启动 GUI）、
+  错误退出码；并已用 `scripts/demo_lab` 实跑 scan→analyze→leads→repro→dossiers 全链路。
 - 项目级扫描排除（2026-11-06）：v7 迁移为 projects 增加 excludes 列（旧库重复列容忍）；
   GUI「扫描选项…」与 CLI `config` 保存，`scan --exclude` 覆盖本次；支持名称与通配符
   （`*.log`、`build*`）；`tests/test_db.py` / `tests/test_scanner.py` / `tests/test_cli.py`

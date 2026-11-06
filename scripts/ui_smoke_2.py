@@ -144,6 +144,11 @@ def main() -> int:
         assert captured.get("excludes") == {".git", "node_modules"}, captured
         print("PASS | 扫描排除设置保存并传入扫描服务")
 
+        sd.askstring = lambda *a, **k: "演示项目"
+        app.on_rename_project()
+        assert db.get_project(pid)["name"] == "演示项目"
+        print("PASS | 项目重命名")
+
         app.on_project_overview()
         root.update()
         tops = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel)]

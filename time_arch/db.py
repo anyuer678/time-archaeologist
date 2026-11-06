@@ -365,6 +365,11 @@ class Database:
             conn.execute("UPDATE projects SET excludes=? WHERE id=?",
                          (excludes, project_id))
 
+    def rename_project(self, project_id: int, name: str) -> None:
+        """修改项目显示名称（仅本机库，不改磁盘目录名）。"""
+        with self._session(write=True) as conn:
+            conn.execute("UPDATE projects SET name=? WHERE id=?", (name, project_id))
+
     # ---------- 扫描运行 ----------
     def start_run(self, project_id: int) -> int:
         with self._session(write=True) as conn:

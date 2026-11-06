@@ -120,6 +120,18 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("只能指定一个", err)
 
+    def test_rename_project(self):
+        self.scan()
+        code, out, err = self.run_cli("config", "proj", "--name", "课程项目")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(Database(self.db_path).get_project(1)["name"], "课程项目")
+        code, out, err = self.run_cli("overview", "--json")
+        rows = json.loads(out)
+        self.assertEqual(rows[0]["name"], "课程项目")
+        code, out, err = self.run_cli("config", "1", "--name", "   ")
+        self.assertEqual(code, 2)
+        self.assertIn("不能为空", err)
+
     def test_analyze_lists_and_exports(self):
         self.scan()
         code, out, err = self.run_cli("analyze", "proj", "--json")

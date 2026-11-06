@@ -45,6 +45,14 @@ class TestDatabase(unittest.TestCase):
         self.assertFalse(created2)
         self.assertEqual(p1, p2)
 
+    def test_rename_project(self):
+        pid, _ = self.db.add_project("/x/y")
+        self.db.rename_project(pid, "课程项目")
+        self.assertEqual(self.db.get_project(pid)["name"], "课程项目")
+        self.assertEqual(self.db.list_projects()[0]["name"], "课程项目")
+        db2 = Database(Path(self.tmp.name) / "a.db")
+        self.assertEqual(db2.get_project(pid)["name"], "课程项目")
+
     def test_project_excludes_default_and_persist(self):
         pid, _ = self.db.add_project("/x/y")
         self.assertEqual(self.db.get_project(pid)["excludes"], "")

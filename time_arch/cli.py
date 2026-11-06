@@ -4,7 +4,7 @@
   python -m time_arch projects
   python -m time_arch overview [--json]
   python -m time_arch rules [--enable RULE_ID] [--disable RULE_ID]
-  python -m time_arch config <项目> [--excludes .git,node_modules | --clear]
+  python -m time_arch config <项目> [--name 新名] [--excludes .git,*.log | --clear]
   python -m time_arch scan <目录> [--name 名称] [--no-analyze]
   python -m time_arch analyze <项目ID或路径> [--snapshot N] [--only leads,relations,...]
   python -m time_arch report <项目> [--format markdown|json] [-o 文件]
@@ -166,12 +166,21 @@ def cmd_config(db: Database, args) -> int:
     p = _resolve_project(db, args.project)
     if args.excludes is not None and args.clear:
         raise CliError("--excludes 与 --clear 只能指定一个")
-    if args.excludes is None and not args.clear:
+    changed = []
+    if args.name is not None:
+        name = args.name.strip()
+        if not name:
+            raise CliError("项目名称不能为空")
+        db.rename_project(p["id"], name)
+        changed.append(f"名称「{name}」")
+    if args.excludes is not None or args.clear:
+        value = "" if args.clear else ",".join(sorted(parse_excludes(args.excludes)))
+        db.set_project_excludes(p["id"], value)
+        changed.append(f"排除「{value or '无'}」")
+    if not changed:
         print(f"项目 #{p['id']}「{p['name']}」排除设置：{p['excludes'] or '（无）'}")
         return 0
-    value = "" if args.clear else ",".join(sorted(parse_excludes(args.excludes)))
-    db.set_project_excludes(p["id"], value)
-    print(f"已保存排除设置：{value or '（无）'}（下次扫描生效）")
+    print(f"项目 #{p['id']} 已更新：" + "，".join(changed))
     return 0
 
 
@@ -686,8 +695,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_rules)
 
-    p = sub.add_parser("config", help="查看/设置项目级扫描排除")
+    p = sub.add_parser("config", help="查看/修改项目名称与扫描排除")
     p.add_argument("project")
+    p.add_argument("--name", help="修改项目显示名称")
     p.add_argument("--excludes", metavar="NAMES",
                    help="逗号/分号分隔的名称或通配符，如 .git,*.log,build*")
     p.add_argument("--clear", action="store_true", help="清空排除设置")

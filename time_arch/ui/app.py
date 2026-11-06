@@ -115,6 +115,8 @@ class App:
         ttk.Button(btns, text="登记项目", style="Accent.TButton",
                    command=self.on_register).pack(fill="x", pady=1)
         ttk.Button(btns, text="重新扫描", command=self.on_rescan).pack(fill="x", pady=1)
+        ttk.Button(btns, text="重命名项目…", command=self.on_rename_project
+                   ).pack(fill="x", pady=1)
         ttk.Button(btns, text="扫描选项…", command=self.on_edit_excludes
                    ).pack(fill="x", pady=1)
         ttk.Button(btns, text="全部项目摘要…", command=self.on_project_overview
@@ -808,6 +810,24 @@ class App:
             messagebox.showinfo("提示", "请先在左侧选择一个项目。", parent=self.root)
             return
         self._start_scan(self.selected_project_id)
+
+    def on_rename_project(self) -> None:
+        pid = self.selected_project_id
+        if pid is None:
+            messagebox.showinfo("提示", "请先在左侧选择一个项目。", parent=self.root)
+            return
+        p = self.db.get_project(pid)
+        name = simpledialog.askstring("重命名项目", "新的项目名称：",
+                                      initialvalue=p["name"], parent=self.root)
+        if name is None:
+            return
+        name = name.strip()
+        if not name:
+            messagebox.showinfo("提示", "项目名称不能为空。", parent=self.root)
+            return
+        self.db.rename_project(pid, name)
+        self.refresh_projects()
+        self.refresh_all_tabs()
 
     def on_edit_excludes(self) -> None:
         pid = self.selected_project_id
