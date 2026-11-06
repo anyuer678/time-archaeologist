@@ -14,6 +14,7 @@
   python -m time_arch tasks <项目> [--detail ID] [--status open] [--export 清单.md]
   python -m time_arch timeline <项目> [-o 时间线.md]
   python -m time_arch milestones <项目> [--persist] [--confirm ID] [--remove ID]
+  python -m time_arch phases <项目> [--add LABEL] [--remove ID] [--json]
   python -m time_arch forensics <项目> [-o 取证报告.md]
   python -m time_arch diff <项目> [--json]
   python -m time_arch maintain [--integrity] [--backup 备份.db] [--vacuum]
@@ -532,6 +533,54 @@ def cmd_maintain(db: Database, args) -> int:
     return 0
 
 
+def cmd_phases(db: Database, args) -> int:
+    p = _resolve_project(db, args.project)
+    snap_ids = {s["id"] for s in db.list_snapshots(p["id"])}
+    if args.add:
+        label = args.add.strip()
+        if not label:
+            raise CliError("阶段名称不能为空")
+        latest = db.latest_snapshot(p["id"])
+        start = args.start if args.start is not None else (latest["id"] if latest else None)
+        for sid in (start, args.end):
+            if sid is not None and sid not in snap_ids:
+                raise CliError(f"快照 #{sid} 不存在或不属于该项目")
+        ph_id = db.add_phase(p["id"], "", label, start, args.end,
+                             note=args.note or "命令行添加", source="user",
+                             now=utcnow_iso())
+        print(f"已添加阶段 #{ph_id}「{label}」")
+    if args.remove is not None:
+        row = db.query("SELECT id FROM phases WHERE id=? AND project_id=?",
+                       (args.remove, p["id"]))
+        if not row:
+            raise CliError(f"阶段 #{args.remove} 不存在或不属于该项目")
+        db.remove_phase(args.remove)
+        print(f"阶段 #{args.remove} 已删除")
+    suggestions = suggest_phases(db, p["id"])
+    stored = db.list_phases(p["id"])
+    if args.json:
+        _json_out({"suggestions": suggestions, "stored": [dict(r) for r in stored]})
+        return 0
+    print("机器阶段建议（可选分析框架，不代表事实）：")
+    printed = False
+    for ph in suggestions:
+        for seg in ph["segments"]:
+            printed = True
+            print(f"  - {ph['label']}：#{seg['start_snapshot']} → "
+                  f"#{seg['end_snapshot']} — {ph['description']}")
+    if not printed:
+        print("  （无）")
+    print("人工确认 / 自定义阶段：")
+    if not stored:
+        print("  （无；可用 --add LABEL 添加自定义阶段）")
+    for r in stored:
+        rng = f"#{r['start_snapshot']} → #{r['end_snapshot']}" if r["end_snapshot"] \
+            else f"自 #{r['start_snapshot']}"
+        print(f"  #{r['id']} [{r['source']}] {r['label']}（{rng}）"
+              + (f" — {r['note']}" if r["note"] else ""))
+    return 0
+
+
 def cmd_milestones(db: Database, args) -> int:
     p = _resolve_project(db, args.project)
     if args.persist:
@@ -707,6 +756,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--remove", type=int, metavar="ID", help="删除里程碑")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_milestones)
+
+    p = sub.add_parser("phases", help="查看阶段建议与人工阶段，或添加/删除阶段")
+    p.add_argument("project")
+    p.add_argument("--add", metavar="LABEL", help="添加自定义阶段")
+    p.add_argument("--start", type=int, metavar="SNAPSHOT")
+    p.add_argument("--end", type=int, metavar="SNAPSHOT")
+    p.add_argument("--note")
+    p.add_argument("--remove", type=int, metavar="ID", help="删除人工阶段")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_phases)
 
     p = sub.add_parser("maintain", help="数据库维护：完整性检查/在线备份/压缩")
     p.add_argument("--integrity", action="store_true")

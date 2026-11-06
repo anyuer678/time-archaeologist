@@ -56,6 +56,7 @@ python -m time_arch repro <项目> --history            # 历史检查；--load 
 python -m time_arch tasks <项目> [--detail 5] [--export 任务清单.md]
 python -m time_arch timeline <项目> -o 时间线.md
 python -m time_arch milestones <项目> [--persist] [--confirm ID] [--remove ID]
+python -m time_arch phases <项目> [--add 名称] [--remove ID] [--json]
 python -m time_arch forensics <项目> -o 取证报告.md      # 2.0 完整取证报告
 python -m time_arch diff <项目> [--export 对比.md]     # 最近两次完成快照对比
 python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据库维护
@@ -148,7 +149,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（146 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（147 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -184,9 +185,10 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
   （demo_lab exp03，B 级 9 项）、评分规则常显、历史载入、复现报告导出、完整取证报告导出、
   项目级扫描排除保存并传入扫描服务、全部项目摘要对话框、空目标校验。
   原有 v0.1.0 冒烟 16/16 无回归。
-- 无头 CLI（2026-11-05/06）：`tests/test_cli.py` 13 项通过——扫描（`--exclude`、项目级
+- 无头 CLI（2026-11-05/06）：`tests/test_cli.py` 14 项通过——扫描（`--exclude`、项目级
   `config` 排除）与项目解析（#ID/路径/名称）、跨项目 `overview`、`rules` 启停、
-  里程碑保存/确认/删除、分析汇总、线索/档案/任务列表与详情、复现检查运行/历史/载入/导出、
+  里程碑保存/确认/删除、阶段建议查看与自定义阶段增删、分析汇总、
+  线索/档案/任务列表与详情、复现检查运行/历史/载入/导出、
   时间线/报告/取证报告导出、双快照对比与 Markdown 对比导出、
   数据库完整性检查/在线备份/压缩、人工状态变更（线索状态/任务完成与重开）、
   模块入口路由（`--version`/`--help` 不启动 GUI）、错误退出码；

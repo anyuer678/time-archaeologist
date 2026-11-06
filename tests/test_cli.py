@@ -257,6 +257,27 @@ class CliTest(unittest.TestCase):
         code, out, err = self.run_cli("milestones", "proj", "--confirm", "99999")
         self.assertEqual(code, 2)
 
+    def test_phases_manage(self):
+        self.scan()
+        code, out, err = self.run_cli("phases", "proj", "--json")
+        self.assertEqual(code, 0, err)
+        data = json.loads(out)
+        self.assertTrue(data["suggestions"])
+        self.assertTrue(any(ph["segments"] for ph in data["suggestions"]))
+        self.assertEqual(data["stored"], [])
+        code, out, err = self.run_cli("phases", "proj", "--add", "联调",
+                                      "--note", "命令行")
+        self.assertEqual(code, 0, err)
+        db = Database(self.db_path)
+        rows = db.list_phases(1)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["label"], "联调")
+        code, out, err = self.run_cli("phases", "proj", "--remove", str(rows[0]["id"]))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(db.list_phases(1), [])
+        code, out, err = self.run_cli("phases", "proj", "--add", "X", "--start", "9999")
+        self.assertEqual(code, 2)
+
     def test_detail_views(self):
         self.scan()
         self.run_cli("analyze", "proj")
