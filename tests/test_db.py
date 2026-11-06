@@ -50,6 +50,14 @@ class TestDatabase(unittest.TestCase):
         self.assertFalse(created2)
         self.assertEqual(p1, p2)
 
+    def test_snapshot_note(self):
+        pid, _, snap = self._seed()
+        self.assertEqual(self.db.list_snapshots(pid)[0]["note"], "")
+        self.db.set_snapshot_note(snap, "提交版")
+        self.assertEqual(self.db.list_snapshots(pid)[0]["note"], "提交版")
+        db2 = Database(Path(self.tmp.name) / "a.db")
+        self.assertEqual(db2.list_snapshots(pid)[0]["note"], "提交版")
+
     def test_rename_project(self):
         pid, _ = self.db.add_project("/x/y")
         self.db.rename_project(pid, "课程项目")

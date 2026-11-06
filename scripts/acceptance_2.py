@@ -129,7 +129,7 @@ check("C1 时间线/任务双导出非空",
       f"{len(md1)} + {len(md2)} 字符")
 check("C2 迁移后 user_version 正确",
       db.query("PRAGMA user_version")[0][0] == SCHEMA_VERSION,
-      f"v{SCHEMA_VERSION}（旧库升级由单元测试覆盖：v0.1.0→v7、v5→v7）")
+      f"v{SCHEMA_VERSION}（旧库升级由单元测试覆盖：v0.1.0→v8、v5→v8）")
 
 shutil_cleanup = None
 passed = sum(1 for _, ok, _ in results if ok)

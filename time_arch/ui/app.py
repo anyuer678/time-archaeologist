@@ -196,14 +196,15 @@ class App:
         right = ttk.Frame(mid)
         right.pack(side="left", fill="both", expand=True)
         ttk.Label(right, text="扫描快照历史（完成的扫描）", style="Accent.TLabel").pack(anchor="w")
-        cols = ("id", "time", "files", "size", "events")
+        cols = ("id", "time", "files", "size", "events", "note")
         self.ov_snaps = ttk.Treeview(right, columns=cols, show="headings", height=9)
         for col, text, w, anchor in (("id", "快照", 50, "e"), ("time", "扫描时间", 150, "w"),
                                      ("files", "文件数", 70, "e"), ("size", "体积", 90, "e"),
-                                     ("events", "事件数", 60, "e")):
+                                     ("events", "事件数", 60, "e"), ("note", "备注", 140, "w")):
             self.ov_snaps.heading(col, text=text)
             self.ov_snaps.column(col, width=w, anchor=anchor)
         self.ov_snaps.pack(fill="both", expand=True, pady=(4, 0))
+        self.ov_snaps.bind("<Double-1>", lambda e: self.on_snapshot_note())
 
     def _build_timeline_tab(self) -> None:
         tab = ttk.Frame(self.tabs, padding=10)
@@ -948,6 +949,26 @@ class App:
         self.refresh_phases()
         self.refresh_compare_choices()
 
+    def on_snapshot_note(self) -> None:
+        sel = self.ov_snaps.selection()
+        if not sel:
+            return
+        vals = self.ov_snaps.item(sel[0], "values")
+        try:
+            sid = int(str(vals[0]).lstrip("#"))
+        except ValueError:
+            return
+        rows = self.db.query("SELECT note FROM snapshots WHERE id=?", (sid,))
+        current = rows[0]["note"] if rows else ""
+        note = simpledialog.askstring(
+            "快照备注",
+            "给这次快照加备注（如「提交版」「答辩前」）：\n备注仅本机保存，不影响扫描数据。",
+            initialvalue=current, parent=self.root)
+        if note is None:
+            return
+        self.db.set_snapshot_note(sid, note.strip())
+        self.refresh_overview()
+
     def refresh_overview(self) -> None:
         for t in self.ov_cat.get_children():
             self.ov_cat.delete(t)
@@ -984,7 +1005,7 @@ class App:
         for s in snaps[:50]:
             self.ov_snaps.insert("", "end", values=(
                 f"#{s['id']}", fmt_time_local(s["created_at"]), s["file_count"],
-                fmt_size(s["total_size"]), s["event_count"]))
+                fmt_size(s["total_size"]), s["event_count"], s["note"] or ""))
 
     def _tl_filter_values(self) -> dict:
         proj = self.tl_project.get()

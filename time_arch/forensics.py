@@ -56,6 +56,8 @@ def build_forensics_markdown(db: Database, project_id: int,
     lines.append(f"- 完成扫描快照数：{len(db.list_snapshots(project_id))}")
     if latest is not None:
         lines.append(f"- 报告快照：#{latest['id']}（{fmt_time_local(latest['created_at'])}）")
+        if latest["note"]:
+            lines.append(f"- 快照备注：{latest['note']}")
     else:
         lines.append("- 报告快照：尚无完成的扫描快照")
     lines.append("")

@@ -85,10 +85,11 @@ def build_markdown(db: Database, project_id: int) -> str:
 
     lines.append("## 二、快照历史")
     if d["snapshots"]:
-        lines.append("| 快照 | 扫描时间(UTC) | 文件数 | 体积(字节) | 事件数 |")
-        lines.append("|---|---|---|---|---|")
+        lines.append("| 快照 | 扫描时间(UTC) | 文件数 | 体积(字节) | 事件数 | 备注 |")
+        lines.append("|---|---|---|---|---|---|")
         for s in d["snapshots"]:
-            lines.append(f"| #{s['id']} | {s['created_at']} | {s['file_count']} | {s['total_size']} | {s['event_count']} |")
+            lines.append(f"| #{s['id']} | {s['created_at']} | {s['file_count']} | "
+                         f"{s['total_size']} | {s['event_count']} | {s['note'] or ''} |")
     else:
         lines.append("（无）")
     lines.append("")

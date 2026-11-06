@@ -40,6 +40,7 @@ time-archaeologist-gui    # 图形界面
 python -m time_arch projects                          # 列出已登记项目
 python -m time_arch projects --remove 3 --yes          # 移除项目库内记录（不动磁盘文件）
 python -m time_arch search <关键词> [--project 项目]   # 跨项目事件搜索（--json 机读）
+python -m time_arch snapshots <项目> [--set ID 备注]  # 快照列表 / 人工备注（--clear ID 清除）
 python -m time_arch overview [--json]                 # 跨项目摘要（线索/任务/档案数量）
 python -m time_arch rules [--enable RULE_ID] [--disable RULE_ID]  # 调查规则启停
 python -m time_arch config <项目> --excludes .git,node_modules   # 项目级排除（GUI 同项）
@@ -85,7 +86,8 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
    扫描完成后可点顶部「一键分析（2.0）」：依次运行关系图谱、调查线索、成果档案与任务生成
    （全部幂等，重跑保留人工状态），完成后自动刷新各页签。
 3. **看结果**：主区十个页签——
-   - **项目概览**：项目信息、最近活动、文件画像（各类别文件数 / 体积 / 最近文件时间）、快照历史。
+   - **项目概览**：项目信息、最近活动、文件画像（各类别文件数 / 体积 / 最近文件时间）、快照历史；
+     双击快照行可加人工备注（如「提交版」「答辩前」，仅本机保存）。
    - **活动时间线**：全部事件，可按项目、事件类型、文件类别、关键词、日期范围过滤（即全局搜索），
      每页 200 条分页加载；「导出 CSV…」按当前筛选导出（UTF-8 BOM，便于 Excel 打开）。
    - **最近发现**：全部项目最近 30 条事件。
@@ -157,7 +159,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（155 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（157 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -184,20 +186,20 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
 
 2.0 验证记录（2026-10-27 初版；2026-11-05、2026-11-06 扩展后复验；Windows 11 x64，Python 3.12）：
 
-- 单元测试：`155 passed`（graph / dossier / repro / investigate / tasks / cli / forensics /
-  overview / v0.1.0→v7 与 v5→v7 迁移等测试模块；含每条规则的正例、反例、边界与
+- 单元测试：`157 passed`（graph / dossier / repro / investigate / tasks / cli / forensics /
+  overview / v0.1.0→v8 与 v5→v8 迁移等测试模块；含每条规则的正例、反例、边界与
   只读验证命令守卫）。
 - UI 冒烟：真实 Tk + 真实仓库全链路（线索→任务→图谱追踪→阶段确认→里程碑→任务人工确认/
   筛选/手动添加/导出）全部通过。
-- 2.0 页签冒烟（2026-11-05/06）：`scripts/ui_smoke_2.py` 15/15 通过——一键分析（关系→线索→
-  档案→任务）并刷新页签；成果档案列表/详情/人工确认-否决-恢复自动；复现检查运行
-  （demo_lab exp03，B 级 9 项）、评分规则常显、历史载入、复现报告导出、
+- 2.0 页签冒烟（2026-11-05/06）：`scripts/ui_smoke_2.py` 16/16 通过——快照人工备注、
+  一键分析（关系→线索→档案→任务）并刷新页签；成果档案列表/详情/人工确认-否决-恢复自动；
+  复现检查运行（demo_lab exp03，B 级 9 项）、评分规则常显、历史载入、复现报告导出、
   完整取证报告 Markdown/JSON 导出、事件 CSV 导出、项目级扫描排除保存并传入扫描服务、
   项目重命名、全部项目摘要对话框、数据库完整性/备份/压缩、空目标校验。
   原有 v0.1.0 冒烟 16/16 无回归。
-- 无头 CLI（2026-11-05/06）：`tests/test_cli.py` 17 项通过——扫描（`--exclude`、项目级
+- 无头 CLI（2026-11-05/06）：`tests/test_cli.py` 18 项通过——扫描（`--exclude`、项目级
   `config` 排除）与项目解析（#ID/路径/名称）、项目移除（显式 `--yes`）、跨项目搜索、
-  `overview`、`rules` 启停、项目重命名、里程碑保存/确认/删除、
+  快照备注、`overview`、`rules` 启停、项目重命名、里程碑保存/确认/删除、
   阶段建议查看与自定义阶段增删、分析汇总、线索/档案/任务列表与详情、
   复现检查运行/历史/载入/导出、时间线 Markdown / 事件 CSV / 报告 /
   取证报告（Markdown+JSON）导出、双快照对比与 Markdown 对比导出、
@@ -221,6 +223,9 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
 - 升级前自动备份（2026-11-06）：打开 v0.1.0/v5 模拟旧库时自动生成 `<db>.v<旧版本>.bak`，
   备份完整性与旧数据均验证可读；全新库/当前版本不生成备份
   （`tests/test_db.py`、`tests/test_dossier_graph.py`、`tests/test_tasks.py`）。
+- 快照人工备注（2026-11-06）：v8 迁移新增 `snapshots.note`；GUI 双击概览快照行备注，
+  CLI `snapshots --set/--clear`；时间线/报告表格包含备注列
+  （`tests/test_db.py`、`tests/test_cli.py` 覆盖持久化与清除）。
 - 打包（2026-11-06）：`pyproject.toml` 动态版本 2.0.0，wheel 实构建成功
   （`time_archaeologist-2.0.0-py3-none-any.whl`，含 CLI/GUI 入口与 LICENSE）；
   `tests/test_packaging.py` 2 项校验元数据与入口可导入。
@@ -241,7 +246,7 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
 ```
 time_arch/
 ├── db.py        SQLite 持久层（projects / scan_runs / snapshots / file_records /
-│                events / findings；v7 项目级排除设置；每操作短事务；打开时把遗留
+│                events / findings；v7 项目级排除、v8 快照备注；每操作短事务；打开时把遗留
 │                running 标记 interrupted）
 ├── scanner.py   只读扫描（自写 scandir 栈式遍历，跳过符号链接目录；可按名称排除
 │                目录/文件；SHA-256 分块可取消；分批提交；取消/异常回滚快照；对比生成事件）

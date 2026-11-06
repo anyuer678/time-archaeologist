@@ -18,7 +18,7 @@ from typing import Iterator
 
 from .util import utcnow_iso
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 _BASE_STATEMENTS = [
     """CREATE TABLE IF NOT EXISTS projects (
@@ -229,10 +229,14 @@ _MIGRATIONS: dict[int, list[str]] = {    2: [
     7: [
         "ALTER TABLE projects ADD COLUMN excludes TEXT NOT NULL DEFAULT ''",
     ],
+    # v8（2026-11-06）：快照备注（人工标注「提交版/答辩前」等，不代表工作时长）。
+    8: [
+        "ALTER TABLE snapshots ADD COLUMN note TEXT NOT NULL DEFAULT ''",
+    ],
 }
 
 # 这些迁移级允许「目标列已存在」（旧库可能已手工加列），重复列错误视为已完成。
-_TOLERANT_DDL = {7}
+_TOLERANT_DDL = {7, 8}
 
 
 class Database:
@@ -468,8 +472,8 @@ class Database:
         return (self.query(sql, (project_id, before_snapshot_id)) or [None])[0]
 
     def list_snapshots(self, project_id: int) -> list[sqlite3.Row]:
-        sql = """SELECT s.id, s.created_at, r.status AS run_status, r.files_scanned,
-                        r.error_count,
+        sql = """SELECT s.id, s.created_at, s.note, r.status AS run_status,
+                        r.files_scanned, r.error_count,
                         (SELECT COUNT(*) FROM file_records f WHERE f.snapshot_id=s.id) AS file_count,
                         (SELECT COALESCE(SUM(f.size),0) FROM file_records f WHERE f.snapshot_id=s.id) AS total_size,
                         (SELECT COUNT(*) FROM events e WHERE e.run_id=s.run_id) AS event_count
@@ -477,6 +481,12 @@ class Database:
                  WHERE s.project_id=? AND r.status='completed'
                  ORDER BY s.id DESC"""
         return self.query(sql, (project_id,))
+
+    def set_snapshot_note(self, snapshot_id: int, note: str) -> None:
+        """人工备注快照（如「提交版」）；不代表工作时长，也不影响扫描数据。"""
+        with self._session(write=True) as conn:
+            conn.execute("UPDATE snapshots SET note=? WHERE id=?",
+                         (note, snapshot_id))
 
     def snapshot_stats(self, snapshot_id: int) -> dict:
         total = self.query(

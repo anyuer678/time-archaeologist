@@ -252,12 +252,12 @@ def export_timeline_markdown(db: Database, project_id: int, path: str) -> dict:
         "",
         "## 快照概览",
         "",
-        "| 快照 | 扫描时间 | 文件数 | 事件数 |",
-        "|---|---|---:|---:|",
+        "| 快照 | 扫描时间 | 文件数 | 事件数 | 备注 |",
+        "|---|---|---:|---:|---|",
     ]
     for s in snaps:
         lines.append(f"| #{s['id']} | {fmt_time_local(s['created_at'])} | "
-                     f"{s['file_count']} | {s['event_count']} |")
+                     f"{s['file_count']} | {s['event_count']} | {s['note'] or ''} |")
 
     lines += ["", "## 机器阶段建议（每段依据可逐项查看）", ""]
     seg_total = 0

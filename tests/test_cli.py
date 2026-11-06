@@ -356,6 +356,21 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("observed_at_utc", stdout)
 
+    def test_snapshot_notes(self):
+        snap = self.scan()["snapshot_id"]
+        code, out, err = self.run_cli("snapshots", "proj", "--set", str(snap), "提交版")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(Database(self.db_path).list_snapshots(1)[0]["note"], "提交版")
+        code, out, err = self.run_cli("snapshots", "proj", "--json")
+        self.assertEqual(code, 0, err)
+        rows = json.loads(out)
+        self.assertEqual(rows[0]["note"], "提交版")
+        code, out, err = self.run_cli("snapshots", "proj", "--clear", str(snap))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(Database(self.db_path).list_snapshots(1)[0]["note"], "")
+        code, out, err = self.run_cli("snapshots", "proj", "--set", "9999", "x")
+        self.assertEqual(code, 2)
+
     def test_remove_project_and_search(self):
         self.scan()
         code, out, err = self.run_cli("search", "train", "--json")

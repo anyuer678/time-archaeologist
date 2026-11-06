@@ -3,6 +3,7 @@
 典型用法（`--db` 需放在子命令之前；省略时用默认数据库）：
   python -m time_arch projects [--remove ID --yes]
   python -m time_arch search <关键词> [--project 项目] [--json]
+  python -m time_arch snapshots <项目> [--set ID 备注 | --clear ID] [--json]
   python -m time_arch overview [--json]
   python -m time_arch rules [--enable RULE_ID] [--disable RULE_ID]
   python -m time_arch config <项目> [--name 新名] [--excludes .git,*.log | --clear]
@@ -170,6 +171,37 @@ def cmd_rules(db: Database, args) -> int:
     for r in rows:
         state = "启用" if r["enabled"] else "停用"
         print(f"[{state}] {r['rule_id']}（v{r['rule_version']}）— {r['description']}")
+    return 0
+
+
+def cmd_snapshots(db: Database, args) -> int:
+    p = _resolve_project(db, args.project)
+    snaps = {s["id"]: s for s in db.list_snapshots(p["id"])}
+    if args.set:
+        raw_id, note = args.set
+        sid = int(raw_id) if raw_id.isdigit() else -1
+        if sid not in snaps:
+            raise CliError(f"快照 #{raw_id} 不存在或不属于该项目")
+        note = note.strip()
+        if not note:
+            raise CliError("备注不能为空（清除请用 --clear ID）")
+        db.set_snapshot_note(sid, note)
+        print(f"快照 #{sid} 备注：{note}")
+    if args.clear is not None:
+        if args.clear not in snaps:
+            raise CliError(f"快照 #{args.clear} 不存在或不属于该项目")
+        db.set_snapshot_note(args.clear, "")
+        print(f"快照 #{args.clear} 备注已清除")
+    rows = db.list_snapshots(p["id"])
+    if args.json:
+        _json_out([dict(r) for r in rows])
+        return 0
+    if not rows:
+        print("（尚无完成的扫描快照）")
+        return 0
+    for r in rows:
+        print(f"#{r['id']} {r['created_at'][:19]} · {r['file_count']} 文件"
+              + (f" · 备注：{r['note']}" if r["note"] else ""))
     return 0
 
 
@@ -719,6 +751,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=200)
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_search)
+
+    p = sub.add_parser("snapshots", help="列出快照或设置人工备注")
+    p.add_argument("project")
+    p.add_argument("--set", nargs=2, metavar=("ID", "NOTE"), help="设置快照备注")
+    p.add_argument("--clear", type=int, metavar="ID", help="清除快照备注")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_snapshots)
 
     p = sub.add_parser("overview", help="跨项目摘要（快照/待查看线索/待处理任务/档案）")
     p.add_argument("--json", action="store_true")

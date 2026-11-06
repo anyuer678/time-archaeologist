@@ -40,6 +40,15 @@ def main() -> int:
         app.refresh_all_tabs()
         root.update()
 
+        import tkinter.simpledialog as sd
+        sd.askstring = lambda *a, **k: "演示快照"
+        kids = app.ov_snaps.get_children()
+        assert kids, "快照历史为空"
+        app.ov_snaps.selection_set(kids[0])
+        app.on_snapshot_note()
+        assert db.list_snapshots(pid)[0]["note"] == "演示快照"
+        print("PASS | 快照人工备注")
+
         # ---- 一键分析：关系 -> 线索 -> 档案 -> 任务 ----
         app.on_analyze_all()
         deadline = time.time() + 20
