@@ -119,6 +119,8 @@ class App:
                    ).pack(fill="x", pady=1)
         ttk.Button(btns, text="全部项目摘要…", command=self.on_project_overview
                    ).pack(fill="x", pady=1)
+        ttk.Button(btns, text="数据库维护…", command=self.on_maintenance
+                   ).pack(fill="x", pady=1)
         ttk.Button(btns, text="移除项目", style="Danger.TButton",
                    command=self.on_remove).pack(fill="x", pady=1)
 
@@ -724,6 +726,79 @@ class App:
                          f"{(r['last_scan_at'] or '-')[:19]}")
         lines += ["", "线索是「值得查看的问题」；任务完成状态由人工确认。"]
         self._detail_dialog("全部项目摘要", "\n".join(lines))
+
+    # ---------------------------------------------------------------- 数据库维护
+    def on_maintenance(self) -> None:
+        win = tk.Toplevel(self.root)
+        win.title("数据库维护")
+        win.geometry("620x260")
+        win.configure(bg=PANEL)
+        body = tk.Frame(win, bg=PANEL)
+        body.pack(fill="both", expand=True, padx=14, pady=12)
+        tk.Label(body, text=f"数据库：{self.db.path}", bg=PANEL, fg=FG, anchor="w",
+                 justify="left", wraplength=580, font=("Consolas", 9)).pack(fill="x")
+        tk.Label(body, text="只影响本机考古数据库，不会修改被扫描目录中的任何文件。"
+                            "建议在压缩或大规模改动前先备份。",
+                 bg=PANEL, fg=FG_DIM, anchor="w", justify="left",
+                 wraplength=580).pack(fill="x", pady=(4, 10))
+        bar = ttk.Frame(body)
+        bar.pack(fill="x")
+        ttk.Button(bar, text="完整性检查", command=self.on_db_integrity
+                   ).pack(side="left")
+        ttk.Button(bar, text="备份…", command=self.on_db_backup
+                   ).pack(side="left", padx=6)
+        ttk.Button(bar, text="压缩（VACUUM）", command=self.on_db_vacuum
+                   ).pack(side="left")
+        ttk.Button(bar, text="关闭", command=win.destroy).pack(side="right")
+        self._maint_info = tk.StringVar(value="选择操作；建议在压缩或大改动前先备份。")
+        tk.Label(body, textvariable=self._maint_info, bg=PANEL, fg=FG_DIM, anchor="w",
+                 justify="left", wraplength=580).pack(fill="x", pady=(12, 0))
+        self._maint_win = win
+
+    def _maint_set(self, text: str) -> None:
+        var = getattr(self, "_maint_info", None)
+        if var is not None:
+            var.set(text)
+
+    def on_db_integrity(self) -> None:
+        try:
+            result = self.db.integrity_check()
+        except Exception as e:
+            self._maint_set(f"完整性检查失败：{e}")
+            return
+        self._maint_set(f"完整性检查：{result}")
+        if result != "ok":
+            messagebox.showwarning("完整性检查",
+                                   f"结果：{result}\n建议先备份数据库再排查。",
+                                   parent=self.root)
+
+    def on_db_backup(self) -> None:
+        path = filedialog.asksaveasfilename(
+            parent=self.root, title="备份考古数据库", defaultextension=".db",
+            initialfile="time_arch_backup.db",
+            filetypes=[("SQLite 数据库", "*.db"), ("所有文件", "*.*")])
+        if not path:
+            return
+        try:
+            self.db.backup(path)
+        except Exception as e:
+            messagebox.showerror("备份失败", str(e), parent=self.root)
+            return
+        self._maint_set(f"备份已写入：{path}")
+        messagebox.showinfo("备份完成", f"数据库已备份：\n{path}", parent=self.root)
+
+    def on_db_vacuum(self) -> None:
+        if not messagebox.askyesno(
+                "压缩数据库",
+                "VACUUM 会重建数据库文件以回收空间，可能需要一点时间。\n继续？",
+                parent=self.root):
+            return
+        try:
+            self.db.vacuum()
+        except Exception as e:
+            messagebox.showerror("压缩失败", str(e), parent=self.root)
+            return
+        self._maint_set("数据库已压缩（VACUUM）。")
 
     # ---------------------------------------------------------------- 扫描
     def on_rescan(self) -> None:

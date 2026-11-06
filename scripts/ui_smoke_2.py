@@ -144,6 +144,27 @@ def main() -> int:
         root.update()
         print("PASS | 全部项目摘要对话框")
 
+        # ---- 数据库维护 ----
+        app.on_maintenance()
+        root.update()
+        assert app._maint_win.winfo_exists()
+        app.on_db_integrity()
+        root.update()
+        assert "ok" in app._maint_info.get()
+        bak = os.path.join(tmpdir, "backup.db")
+        fd.asksaveasfilename = lambda *a, **k: bak
+        mb.showinfo = lambda *a, **k: None
+        app.on_db_backup()
+        assert os.path.exists(bak)
+        copy = Database(bak)
+        assert copy.list_projects() and copy.integrity_check() == "ok"
+        mb.askyesno = lambda *a, **k: True
+        app.on_db_vacuum()
+        root.update()
+        assert "VACUUM" in app._maint_info.get()
+        app._maint_win.destroy()
+        print("PASS | 数据库完整性/备份/压缩")
+
         shown = []
         mb.showinfo = lambda title, msg, **k: shown.append(msg)
         app.rp_target.set("")
