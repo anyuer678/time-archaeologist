@@ -134,7 +134,8 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 - **实验复现检查器**：对实验运行目录（参数/输入/随机种子/环境/输出/日志）做只读检查，
   每项证据分级 **A 直接证据 / B 合理推测需人工确认 / C 缺失 / D 相互矛盾**，
   给出公开评分规则（逐项可见加扣分依据），可导出检查报告。不安装依赖、不联网、不执行代码。
-  「复现检查」页签可直接运行、查看逐项证据、载入历史检查。
+  「复现检查」页签可直接运行、查看逐项证据、载入历史检查；目标文件属于成果档案时
+  自动建立关联（artifact_id）。
 - **调查工作台**：8 条确定性规则（结果缺参数/有测试无报告/报错与完整结果并存/
   疑似重复结果/文档声明无证据/依赖版本冲突/结果变化无记录/仅文档配置变化）。
   每条线索必须给出证据与误报可能性；线索是「值得查看的问题」，不是结论。
@@ -154,7 +155,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（152 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（153 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -210,6 +211,8 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
   快照范围与错误处理、JSON 机读版结构与导出。
 - 发布包成员核对（2026-11-05）：成果档案只读读取 zip 中央目录——真实包列出成员并写入
   已验证事实，损坏/伪造包明确标为待调查（`tests/test_dossier_graph.py` 正反例）。
+- 复现检查自动关联档案（2026-11-06）：目标文件属于某成果档案的关联文件时，
+  自动写入 artifact_id，便于从复现结果回溯档案证据（`tests/test_repro.py` 正反例）。
 - 打包（2026-11-06）：`pyproject.toml` 动态版本 2.0.0，wheel 实构建成功
   （`time_archaeologist-2.0.0-py3-none-any.whl`，含 CLI/GUI 入口与 LICENSE）；
   `tests/test_packaging.py` 2 项校验元数据与入口可导入。

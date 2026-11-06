@@ -297,9 +297,25 @@ def check_repro(db: Database, project_id: int, snapshot_id: int, target_path: st
     }
 
 
+def _find_artifact_for_target(db: Database, project_id: int, snapshot_id: int,
+                              target_path: str) -> int | None:
+    """若目标文件属于某成果档案的关联文件，返回该档案 id（用于建立证据链）。"""
+    target = _norm(target_path)
+    rows = db.query(
+        "SELECT af.artifact_id, af.rel_path FROM artifact_files af "
+        "JOIN artifacts a ON a.id=af.artifact_id "
+        "WHERE a.project_id=? AND af.snapshot_id=?", (project_id, snapshot_id))
+    for r in rows:
+        if _norm(r["rel_path"]) == target:
+            return r["artifact_id"]
+    return None
+
+
 def run_repro_check(db: Database, project_id: int, snapshot_id: int, target_path: str,
                     artifact_id: int | None = None) -> dict:
     """执行并持久化复现检查（幂等：同快照同目标整行替换）。"""
+    if artifact_id is None:
+        artifact_id = _find_artifact_for_target(db, project_id, snapshot_id, target_path)
     result = check_repro(db, project_id, snapshot_id, target_path, artifact_id)
     cid = db.save_repro_check(
         project_id, snapshot_id, result["target_path"], result["level"],

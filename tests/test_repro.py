@@ -146,6 +146,19 @@ class TestReproScoringAndPersist(_Base):
         self.assertEqual(loaded["score"], r1["score"])
         self.assertEqual(len(loaded["checks"]), len(ITEM_WEIGHTS))
 
+    def test_auto_link_artifact(self):
+        from time_arch.dossier import run_dossier_analysis
+        pid, snap = self.scan(COMPLETE)
+        run_dossier_analysis(self.db, pid, snap)
+        r = run_repro_check(self.db, pid, snap, "runs/exp01/metrics.json")
+        self.assertIsNotNone(r["artifact_id"])
+        self.assertIsNotNone(self.db.get_artifact(r["artifact_id"]))
+        row = self.db.list_repro_checks(pid, snap)[0]
+        self.assertEqual(row["artifact_id"], r["artifact_id"])
+        # 不属于任何档案的目标保持为空
+        r2 = run_repro_check(self.db, pid, snap, "src/train.py")
+        self.assertIsNone(r2["artifact_id"])
+
     def test_deterministic_rerun_same_result(self):
         pid, snap = self.scan(COMPLETE)
         a = check_repro(self.db, pid, snap, "runs/exp01/metrics.json")
