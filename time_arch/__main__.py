@@ -3,7 +3,7 @@ import sys
 
 _CLI_COMMANDS = {"projects", "overview", "rules", "config", "scan", "analyze",
                  "report", "leads", "dossiers", "repro", "tasks", "timeline",
-                 "forensics", "diff", "maintain"}
+                 "forensics", "milestones", "diff", "maintain"}
 _CLI_FLAGS = {"-h", "--help", "--version"}
 
 

@@ -236,6 +236,27 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("未知规则", err)
 
+    def test_milestones_manage(self):
+        self.scan()
+        code, out, err = self.run_cli("milestones", "proj")
+        self.assertEqual(code, 0, err)
+        self.assertIn("尚无里程碑", out)
+        code, out, err = self.run_cli("milestones", "proj", "--persist")
+        self.assertEqual(code, 0, err)
+        db = Database(self.db_path)
+        rows = db.list_milestones(1)
+        self.assertTrue(rows)
+        mid = rows[0]["id"]
+        code, out, err = self.run_cli("milestones", "proj", "--confirm", str(mid))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(db.query("SELECT status FROM milestones WHERE id=?",
+                                  (mid,))[0][0], "confirmed")
+        code, out, err = self.run_cli("milestones", "proj", "--remove", str(mid))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(db.list_milestones(1)), len(rows) - 1)
+        code, out, err = self.run_cli("milestones", "proj", "--confirm", "99999")
+        self.assertEqual(code, 2)
+
     def test_detail_views(self):
         self.scan()
         self.run_cli("analyze", "proj")

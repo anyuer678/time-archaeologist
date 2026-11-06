@@ -13,6 +13,7 @@
   python -m time_arch repro <项目> [目标文件] [--history] [--load ID] [--export 报告.md]
   python -m time_arch tasks <项目> [--detail ID] [--status open] [--export 清单.md]
   python -m time_arch timeline <项目> [-o 时间线.md]
+  python -m time_arch milestones <项目> [--persist] [--confirm ID] [--remove ID]
   python -m time_arch forensics <项目> [-o 取证报告.md]
   python -m time_arch diff <项目> [--json]
   python -m time_arch maintain [--integrity] [--backup 备份.db] [--vacuum]
@@ -531,6 +532,39 @@ def cmd_maintain(db: Database, args) -> int:
     return 0
 
 
+def cmd_milestones(db: Database, args) -> int:
+    p = _resolve_project(db, args.project)
+    if args.persist:
+        n = persist_milestone_suggestions(db, p["id"])
+        print(f"已保存机器建议里程碑：新建 {n} 条")
+    for action, label in (("confirm", "人工确认"), ("remove", "删除")):
+        mid = getattr(args, action)
+        if mid is None:
+            continue
+        row = db.query("SELECT id FROM milestones WHERE id=? AND project_id=?",
+                       (mid, p["id"]))
+        if not row:
+            raise CliError(f"里程碑 #{mid} 不存在或不属于该项目")
+        if action == "confirm":
+            db.confirm_milestone(mid, utcnow_iso())
+        else:
+            db.remove_milestone(mid)
+        print(f"里程碑 #{mid} 已{label}")
+    rows = db.list_milestones(p["id"])
+    if args.json:
+        _json_out([_parse_json_fields(dict(r), ("evidence",)) for r in rows])
+        return 0
+    if not rows:
+        print("（尚无里程碑；可用 --persist 保存机器建议。）")
+        return 0
+    for r in rows:
+        origin = "机器建议" if r["origin"] == "machine" else "人工添加"
+        snap = f"快照 #{r['snapshot_id']}" if r["snapshot_id"] else "未锚定"
+        print(f"#{r['id']} [{origin}·{r['status']}] {r['title']}（{snap}）"
+              + (f" — {r['note']}" if r["note"] else ""))
+    return 0
+
+
 def cmd_diff(db: Database, args) -> int:
     p = _resolve_project(db, args.project)
     latest = _snapshot(db, p["id"], args.snapshot)
@@ -665,6 +699,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--out", help="默认输出到标准输出")
     p.add_argument("--snapshot", type=int)
     p.set_defaults(func=cmd_forensics)
+
+    p = sub.add_parser("milestones", help="查看/确认/删除里程碑，或保存机器建议")
+    p.add_argument("project")
+    p.add_argument("--persist", action="store_true", help="保存机器建议里程碑")
+    p.add_argument("--confirm", type=int, metavar="ID", help="人工确认里程碑")
+    p.add_argument("--remove", type=int, metavar="ID", help="删除里程碑")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_milestones)
 
     p = sub.add_parser("maintain", help="数据库维护：完整性检查/在线备份/压缩")
     p.add_argument("--integrity", action="store_true")
