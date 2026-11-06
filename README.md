@@ -5,7 +5,7 @@
 
 **它不是**文件管理器、待办清单、知识库或 AI 聊天工具。
 
-![时光考古机界面（v2.0，十页签；演示项目为 scripts/demo_lab）](shots/app_overview.png)
+![时光考古机界面（v2.1，十页签；演示项目为 scripts/demo_lab）](shots/app_overview.png)
 
 ## 技术栈
 
@@ -41,6 +41,7 @@ python -m time_arch projects                          # 列出已登记项目
 python -m time_arch projects --remove 3 --yes          # 移除项目库内记录（不动磁盘文件）
 python -m time_arch search <关键词> [--project 项目]   # 跨项目事件搜索（--json 机读）
 python -m time_arch snapshots <项目> [--set ID 备注]  # 快照列表 / 人工备注（--clear ID 清除）
+python -m time_arch gitmeta <项目> [--limit N] [--json]  # 只读 Git 元数据（HEAD/refs/reflog）
 python -m time_arch overview [--json]                 # 跨项目摘要（线索/任务/档案数量）
 python -m time_arch rules [--enable RULE_ID] [--disable RULE_ID]  # 调查规则启停
 python -m time_arch config <项目> --excludes .git,node_modules   # 项目级排除（GUI 同项）
@@ -80,6 +81,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
    （逗号分隔，留空=扫描全部）。
    点「重命名项目…」可修改显示名称（只改本机库，不改磁盘目录名）。
    点「全部项目摘要…」可查看各项目最新快照、待查看线索、待处理任务与档案数量。
+   点「Git 痕迹…」只读查看仓库的 HEAD/分支/引用与 reflog（不解压对象、不执行 git）。
    点「数据库维护…」可做完整性检查、在线备份与 VACUUM 压缩（只影响本机数据库）。
 2. **扫描**：选中项目后点「重新扫描」。顶部扫描状态条实时显示已扫描文件数、已哈希体积、
    错误数和当前文件；随时可「取消扫描」（部分快照自动回滚，之后可安全重扫）。
@@ -156,10 +158,21 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 诚实边界：文件系统只能还原部分历史；mtime 不等于工作时长；所有自动判断均附证据来源，
 误报/漏报/无法判断都有明确的表达方式（线索的「误报可能性」、复现检查的 B/C/D 级）。
 
+## 2.1：Git 元数据痕迹（新增）
+
+只读读取项目内 `.git` 的文本元数据（`HEAD`、`refs/`、`packed-refs`、`logs/` reflog），
+不执行 `git`、不解压 commit 对象、不联网：
+
+- **GUI**：左侧「Git 痕迹…」查看当前分支、HEAD 提交、引用列表与最近 reflog。
+- **CLI**：`python -m time_arch gitmeta <项目> [--limit N] [--json]`。
+- **取证报告**：项目含 `.git` 时自动增加「七、Git 元数据」章节（Markdown/JSON）。
+- 诚实边界：只覆盖文本元数据，不读取提交内容或工作区状态；reflog 时间是 Git 动作时间
+  （提交、切分支、合并等），与文件 mtime 含义不同，也不能解释为工作时长。
+
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（157 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（163 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -184,28 +197,28 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
   发起后台扫描（UI → worker 线程 → 队列轮询 → 完成回调 → 自动选中项目 → 刷新）
   并验证事件入库。
 
-2.0 验证记录（2026-10-27 初版；2026-11-05、2026-11-06 扩展后复验；Windows 11 x64，Python 3.12）：
+2.x 验证记录（2026-10-27 初版；2026-11-05、2026-11-06 扩展后复验；Windows 11 x64，Python 3.12）：
 
-- 单元测试：`157 passed`（graph / dossier / repro / investigate / tasks / cli / forensics /
-  overview / v0.1.0→v8 与 v5→v8 迁移等测试模块；含每条规则的正例、反例、边界与
+- 单元测试：`163 passed`（graph / dossier / repro / investigate / tasks / cli / forensics /
+  overview / gitmeta / v0.1.0→v8 与 v5→v8 迁移等测试模块；含每条规则的正例、反例、边界与
   只读验证命令守卫）。
 - UI 冒烟：真实 Tk + 真实仓库全链路（线索→任务→图谱追踪→阶段确认→里程碑→任务人工确认/
   筛选/手动添加/导出）全部通过。
-- 2.0 页签冒烟（2026-11-05/06）：`scripts/ui_smoke_2.py` 16/16 通过——快照人工备注、
+- 2.0 页签冒烟（2026-11-05/06）：`scripts/ui_smoke_2.py` 17/17 通过——快照人工备注、
   一键分析（关系→线索→档案→任务）并刷新页签；成果档案列表/详情/人工确认-否决-恢复自动；
   复现检查运行（demo_lab exp03，B 级 9 项）、评分规则常显、历史载入、复现报告导出、
   完整取证报告 Markdown/JSON 导出、事件 CSV 导出、项目级扫描排除保存并传入扫描服务、
-  项目重命名、全部项目摘要对话框、数据库完整性/备份/压缩、空目标校验。
-  原有 v0.1.0 冒烟 16/16 无回归。
-- 无头 CLI（2026-11-05/06）：`tests/test_cli.py` 18 项通过——扫描（`--exclude`、项目级
+  项目重命名、全部项目摘要对话框、Git 痕迹（非 Git 项目提示）、
+  数据库完整性/备份/压缩、空目标校验。原有 v0.1.0 冒烟 16/16 无回归。
+- 无头 CLI（2026-11-05/06）：`tests/test_cli.py` 19 项通过——扫描（`--exclude`、项目级
   `config` 排除）与项目解析（#ID/路径/名称）、项目移除（显式 `--yes`）、跨项目搜索、
-  快照备注、`overview`、`rules` 启停、项目重命名、里程碑保存/确认/删除、
-  阶段建议查看与自定义阶段增删、分析汇总、线索/档案/任务列表与详情、
-  复现检查运行/历史/载入/导出、时间线 Markdown / 事件 CSV / 报告 /
-  取证报告（Markdown+JSON）导出、双快照对比与 Markdown 对比导出、
-  数据库完整性检查/在线备份/压缩、人工状态变更（线索状态/任务完成与重开）、
-  模块入口路由（`--version`/`--help` 不启动 GUI）、错误退出码；
-  并已用 `scripts/demo_lab` 实跑 scan→analyze→leads→repro→dossiers 全链路。
+  快照备注、Git 元数据（gitmeta）、`overview`、`rules` 启停、项目重命名、
+  里程碑保存/确认/删除、阶段建议查看与自定义阶段增删、分析汇总、
+  线索/档案/任务列表与详情、复现检查运行/历史/载入/导出、
+  时间线 Markdown / 事件 CSV / 报告 / 取证报告（Markdown+JSON）导出、
+  双快照对比与 Markdown 对比导出、数据库完整性检查/在线备份/压缩、
+  人工状态变更（线索状态/任务完成与重开）、模块入口路由（`--version`/`--help` 不启动 GUI）、
+  错误退出码；并已用 `scripts/demo_lab` 实跑 scan→analyze→leads→repro→dossiers 全链路。
 - 项目级扫描排除（2026-11-06）：v7 迁移为 projects 增加 excludes 列（旧库重复列容忍）；
   GUI「扫描选项…」与 CLI `config` 保存，`scan --exclude` 覆盖本次；支持名称与通配符
   （`*.log`、`build*`）；`tests/test_db.py` / `tests/test_scanner.py` / `tests/test_cli.py`
@@ -213,9 +226,9 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
 - 跨项目摘要与规则启停（2026-11-06）：`overview.py` 只读聚合最新快照 / 待查看线索 /
   待处理任务 / 档案数量（GUI「全部项目摘要…」+ CLI `overview`）；CLI `rules` 可启停
   8 条调查规则；`tests/test_overview.py` 与 `tests/test_cli.py` 覆盖。
-- 完整取证报告（2026-11-05/06）：`tests/test_forensics.py` 5 项通过——Markdown 章节齐全、
+- 完整取证报告（2026-11-05/06）：`tests/test_forensics.py` 6 项通过——Markdown 章节齐全、
   诚实边界声明、档案/线索/任务/复现/阶段内容、无扫描项目可构建、导出与重跑确定性、
-  快照范围与错误处理、JSON 机读版结构与导出。
+  快照范围与错误处理、JSON 机读版结构与导出、Git 元数据章节。
 - 发布包成员核对（2026-11-05）：成果档案只读读取 zip 中央目录——真实包列出成员并写入
   已验证事实，损坏/伪造包明确标为待调查（`tests/test_dossier_graph.py` 正反例）。
 - 复现检查自动关联档案（2026-11-06）：目标文件属于某成果档案的关联文件时，
@@ -226,8 +239,11 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
 - 快照人工备注（2026-11-06）：v8 迁移新增 `snapshots.note`；GUI 双击概览快照行备注，
   CLI `snapshots --set/--clear`；时间线/报告表格包含备注列
   （`tests/test_db.py`、`tests/test_cli.py` 覆盖持久化与清除）。
-- 打包（2026-11-06）：`pyproject.toml` 动态版本 2.0.0，wheel 实构建成功
-  （`time_archaeologist-2.0.0-py3-none-any.whl`，含 CLI/GUI 入口与 LICENSE）；
+- Git 元数据（2026-11-06，2.1）：`tests/test_gitmeta.py` 4 项——HEAD/refs/packed-refs/
+  reflog 解析、HEAD↔分支 reflog 去重、gitdir 间接指向、畸形行忽略、非仓库返回空；
+  CLI `gitmeta`、GUI 非 Git 提示、取证报告「七、Git 元数据」章节均有测试覆盖。
+- 打包（2026-11-06）：`pyproject.toml` 动态版本 **2.1.0**，wheel 实构建成功
+  （`time_archaeologist-2.1.0-py3-none-any.whl`，含 CLI/GUI 入口、gitmeta 与 LICENSE）；
   `tests/test_packaging.py` 2 项校验元数据与入口可导入。
 - 2.0 端到端验收 `19/19 PASS`（两个真实目录）：项目 A = 本仓库自身源码（软件项目，
   398 文件（含 .git 内部对象，随提交数变化）：74 关系边、反向追踪 48 节点、13 线索、
@@ -251,6 +267,7 @@ time_arch/
 ├── scanner.py   只读扫描（自写 scandir 栈式遍历，跳过符号链接目录；可按名称排除
 │                目录/文件；SHA-256 分块可取消；分批提交；取消/异常回滚快照；对比生成事件）
 ├── classify.py  文件类别启发式（源码/配置/测试/文档/日志/数据/构建产物）
+├── gitmeta.py   2.1 只读 Git 元数据（HEAD/refs/packed-refs/reflog，支持 gitdir 间接）
 ├── analyze.py   成果考古启发式（可执行文件/发布包/测试报告/实验产物/日志证据）
 ├── graph.py     2.0 关系图谱（5 条关系规则，边带 source+confidence，支持反向追踪）
 ├── dossier.py   2.0 成果档案（已验证事实 / 未验证假设 / 完整性检查）
@@ -295,6 +312,8 @@ scripts/         ui_smoke.py 冒烟、ui_smoke_2.py 2.0 页签冒烟、acceptanc
 - 扫描默认包含 .git 等目录中的全部文件（不解析版本库内部结构）；可按名称或通配符排除：
   GUI「扫描选项…」保存到项目，CLI `config` 设置，`scan --exclude` 仅覆盖本次扫描。
   排除支持通配符（如 `*.log`、`build*`，大小写不敏感），不支持正则。
+- Git 元数据只覆盖 HEAD / refs / packed-refs / reflog（支持 gitdir 间接指向）；
+  不解压 commit 对象，不读取工作区、子模块或 stash 状态。
 - Windows 之外的平台界面字体/长路径行为未验证。
 
 ## 许可证

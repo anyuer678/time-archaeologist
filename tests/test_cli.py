@@ -356,6 +356,35 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("observed_at_utc", stdout)
 
+    def test_gitmeta(self):
+        git = self.root / ".git"
+        (git / "refs" / "heads").mkdir(parents=True)
+        (git / "logs" / "refs" / "heads").mkdir(parents=True)
+        (git / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        (git / "refs" / "heads" / "main").write_text("a" * 40 + "\n", encoding="utf-8")
+        (git / "logs" / "HEAD").write_text(
+            "0" * 40 + f" {'a' * 40} Alice <a@example.com> 1767225600 +0800\t"
+            "commit (initial): init\n", encoding="utf-8")
+        self.scan()
+        code, out, err = self.run_cli("gitmeta", "proj", "--json")
+        self.assertEqual(code, 0, err)
+        meta = json.loads(out)
+        self.assertEqual(meta["branch"], "refs/heads/main")
+        self.assertEqual(meta["head_sha"], "a" * 40)
+        self.assertEqual(meta["reflog"][0]["message"], "commit (initial): init")
+        code, out, err = self.run_cli("gitmeta", "proj")
+        self.assertEqual(code, 0, err)
+        self.assertIn("reflog", out)
+        # 非 Git 目录
+        plain = Path(self.tmp.name) / "plain"
+        plain.mkdir()
+        (plain / "a.txt").write_text("x", encoding="utf-8")
+        code, out, err = self.run_cli("scan", str(plain), "--json")
+        self.assertEqual(code, 0, err)
+        code, out, err = self.run_cli("gitmeta", "plain")
+        self.assertEqual(code, 2)
+        self.assertIn("未发现 .git", err)
+
     def test_snapshot_notes(self):
         snap = self.scan()["snapshot_id"]
         code, out, err = self.run_cli("snapshots", "proj", "--set", str(snap), "提交版")

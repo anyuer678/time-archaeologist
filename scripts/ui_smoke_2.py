@@ -178,6 +178,12 @@ def main() -> int:
         root.update()
         print("PASS | 全部项目摘要对话框")
 
+        shown = []
+        mb.showinfo = lambda title, msg, **k: shown.append(msg)
+        app.on_git_meta()
+        assert shown and "未发现 .git" in shown[0]
+        print("PASS | Git 痕迹（非 Git 项目提示）")
+
         # ---- 数据库维护 ----
         app.on_maintenance()
         root.update()

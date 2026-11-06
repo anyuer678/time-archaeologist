@@ -3,6 +3,6 @@
 只读扫描项目目录，构建项目活动时间线与成果证据链。
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 APP_NAME = "Time Archaeologist"
 APP_NAME_CN = "时光考古机"

@@ -18,6 +18,7 @@ from ..classify import CATEGORY_LABELS
 from ..db import Database
 from ..dossier import ARTIFACT_KINDS, ROLE_LABELS, dossier_view, run_dossier_analysis
 from ..forensics import export_forensics_json, export_forensics_markdown
+from ..gitmeta import read_git_meta
 from ..graph import (RELATION_LABELS, RULES as GRAPH_RULES,
                      RULE_LABELS as GRAPH_RULE_LABELS,
                      run_relation_analysis, trace_relations)
@@ -120,6 +121,8 @@ class App:
         ttk.Button(btns, text="扫描选项…", command=self.on_edit_excludes
                    ).pack(fill="x", pady=1)
         ttk.Button(btns, text="全部项目摘要…", command=self.on_project_overview
+                   ).pack(fill="x", pady=1)
+        ttk.Button(btns, text="Git 痕迹…", command=self.on_git_meta
                    ).pack(fill="x", pady=1)
         ttk.Button(btns, text="数据库维护…", command=self.on_maintenance
                    ).pack(fill="x", pady=1)
@@ -731,6 +734,34 @@ class App:
                          f"{(r['last_scan_at'] or '-')[:19]}")
         lines += ["", "线索是「值得查看的问题」；任务完成状态由人工确认。"]
         self._detail_dialog("全部项目摘要", "\n".join(lines))
+
+    def on_git_meta(self) -> None:
+        pid = self.selected_project_id
+        if pid is None:
+            messagebox.showinfo("提示", "请先在左侧选择一个项目。", parent=self.root)
+            return
+        p = self.db.get_project(pid)
+        meta = read_git_meta(p["path"], limit=100)
+        if meta is None:
+            messagebox.showinfo(
+                "Git 痕迹",
+                "该目录未发现 .git（不是 Git 仓库或无法定位 git 目录）。",
+                parent=self.root)
+            return
+        lines = [f"Git 目录：{meta['git_dir']}",
+                 f"HEAD：{meta['head'] or '（空）'}",
+                 f"分支：{meta['branch'] or '（detached）'}"
+                 f" · 提交：{meta['head_sha'] or '未知'}", "",
+                 f"引用（{len(meta['refs'])}）："]
+        for name, sha in sorted(meta["refs"].items())[:30]:
+            lines.append(f"  {name} → {sha[:12]}…")
+        lines += ["", "reflog（Git 动作时间，非工作时长；只读文本，未执行 git）："]
+        if meta["reflog"]:
+            for r in meta["reflog"]:
+                lines.append(f"  {r['time_utc']}  [{r['ref']}]  {r['message']}")
+        else:
+            lines.append("  （无 reflog）")
+        self._detail_dialog("Git 痕迹", "\n".join(lines))
 
     # ---------------------------------------------------------------- 数据库维护
     def on_maintenance(self) -> None:

@@ -94,7 +94,7 @@ class ForensicsTest(unittest.TestCase):
         data = json.loads(build_forensics_json(self.db, self.pid))
         for key in ("project", "snapshot", "stats", "artifacts", "leads",
                     "tasks", "repro_checks", "phase_suggestions",
-                    "milestones", "disclaimer", "generated_at"):
+                    "milestones", "git", "disclaimer", "generated_at"):
             self.assertIn(key, data)
         self.assertEqual(data["project"]["id"], self.pid)
         self.assertEqual(data["snapshot"]["id"], self.snap)
@@ -108,6 +108,18 @@ class ForensicsTest(unittest.TestCase):
         export_forensics_json(self.db, self.pid, str(out))
         reloaded = json.loads(out.read_text(encoding="utf-8"))
         self.assertEqual(reloaded["project"]["id"], self.pid)
+
+    def test_git_metadata_section(self):
+        git = self.root / ".git"
+        (git / "refs" / "heads").mkdir(parents=True)
+        (git / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        (git / "refs" / "heads" / "main").write_text("a" * 40 + "\n",
+                                                     encoding="utf-8")
+        md = build_forensics_markdown(self.db, self.pid)
+        self.assertIn("## 七、Git 元数据", md)
+        data = json.loads(build_forensics_json(self.db, self.pid))
+        self.assertEqual(data["git"]["branch"], "refs/heads/main")
+        self.assertEqual(data["git"]["head_sha"], "a" * 40)
 
     def test_snapshot_scope_and_errors(self):
         second = run_scan(self.db, self.pid).snapshot_id

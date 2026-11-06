@@ -4,6 +4,7 @@
   python -m time_arch projects [--remove ID --yes]
   python -m time_arch search <关键词> [--project 项目] [--json]
   python -m time_arch snapshots <项目> [--set ID 备注 | --clear ID] [--json]
+  python -m time_arch gitmeta <项目> [--limit N] [--json]
   python -m time_arch overview [--json]
   python -m time_arch rules [--enable RULE_ID] [--disable RULE_ID]
   python -m time_arch config <项目> [--name 新名] [--excludes .git,*.log | --clear]
@@ -38,6 +39,7 @@ from .db import Database
 from .dossier import dossier_view, run_dossier_analysis
 from .forensics import (build_forensics_json, build_forensics_markdown,
                         export_forensics_markdown)
+from .gitmeta import read_git_meta
 from .graph import run_relation_analysis
 from .investigate import LEADS_RULES, RULE_LABELS, lead_view, run_lead_analysis
 from .overview import project_summaries
@@ -171,6 +173,27 @@ def cmd_rules(db: Database, args) -> int:
     for r in rows:
         state = "启用" if r["enabled"] else "停用"
         print(f"[{state}] {r['rule_id']}（v{r['rule_version']}）— {r['description']}")
+    return 0
+
+
+def cmd_gitmeta(db: Database, args) -> int:
+    p = _resolve_project(db, args.project)
+    meta = read_git_meta(p["path"], limit=args.limit)
+    if meta is None:
+        raise CliError("该目录未发现 .git（不是 Git 仓库或无法定位 git 目录）")
+    if args.json:
+        _json_out(meta)
+        return 0
+    print(f"Git 目录：{meta['git_dir']}")
+    print(f"HEAD：{meta['head'] or '（空）'}")
+    print(f"分支：{meta['branch'] or '（detached）'}"
+          f" · 提交：{meta['head_sha'] or '未知'}")
+    print(f"引用：{len(meta['refs'])} 个")
+    for name, sha in sorted(meta["refs"].items())[:20]:
+        print(f"  {name} → {sha[:12]}…")
+    print(f"reflog：{len(meta['reflog'])} 条（Git 动作时间，非工作时长；未执行 git）")
+    for r in meta["reflog"]:
+        print(f"  {r['time_utc']}  [{r['ref']}]  {r['message']}")
     return 0
 
 
@@ -758,6 +781,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--clear", type=int, metavar="ID", help="清除快照备注")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_snapshots)
+
+    p = sub.add_parser("gitmeta", help="只读查看 Git 元数据（HEAD/refs/reflog）")
+    p.add_argument("project")
+    p.add_argument("--limit", type=int, default=100)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_gitmeta)
 
     p = sub.add_parser("overview", help="跨项目摘要（快照/待查看线索/待处理任务/档案）")
     p.add_argument("--json", action="store_true")

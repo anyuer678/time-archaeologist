@@ -11,6 +11,7 @@ import json
 from .classify import CATEGORY_LABELS
 from .db import Database
 from .dossier import ROLE_LABELS, dossier_view
+from .gitmeta import read_git_meta
 from .investigate import lead_view
 from .phases import suggest_phases
 from .repro import ITEM_WEIGHTS, LEVEL_LABELS, LEVEL_POINTS, load_repro_check, scoring_rules_text
@@ -222,6 +223,22 @@ def build_forensics_markdown(db: Database, project_id: int,
     else:
         lines.append("（尚无已保存的里程碑；可在 GUI「演化阶段」页保存机器建议。）")
     lines.append("")
+
+    git = read_git_meta(project["path"], limit=50)
+    if git is not None:
+        lines += ["## 七、Git 元数据（只读文本，未执行 git）", "",
+                  f"- HEAD：`{git['head'] or '（空）'}`",
+                  f"- 分支：{git['branch'] or '（detached）'}"
+                  f" · 提交：`{git['head_sha'] or '未知'}`",
+                  f"- 引用：{len(git['refs'])} 个"]
+        if git["reflog"]:
+            lines += ["", "| Git 动作时间(UTC) | 引用 | 说明 |", "|---|---|---|"]
+            for r in git["reflog"]:
+                lines.append(f"| {r['time_utc']} | {r['ref']} | {r['message']} |")
+        else:
+            lines.append("- （无 reflog）")
+        lines += ["", "> Git 时间是提交/切分支等动作的元数据，与文件 mtime 含义不同，"
+                      "不代表工作时长，也不代表提交内容质量。", ""]
     return "\n".join(lines) + "\n"
 
 
@@ -277,6 +294,7 @@ def build_forensics_json(db: Database, project_id: int,
         "repro_checks": checks,
         "phase_suggestions": suggest_phases(db, project_id),
         "milestones": [dict(r) for r in db.list_milestones(project_id)],
+        "git": read_git_meta(project["path"], limit=100),
         "disclaimer": DISCLAIMER,
     }
     return json.dumps(data, ensure_ascii=False, indent=2, default=str)
