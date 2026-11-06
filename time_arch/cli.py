@@ -40,7 +40,8 @@ from .investigate import LEADS_RULES, RULE_LABELS, lead_view, run_lead_analysis
 from .overview import project_summaries
 from .phases import (persist_milestone_suggestions, suggest_milestones,
                      suggest_phases, export_timeline_markdown)
-from .reports import build_diff_markdown, build_json, build_markdown, export_report
+from .reports import (build_diff_markdown, build_events_csv, build_json,
+                      build_markdown, export_report)
 from .repro import (LEVEL_LABELS, build_repro_report, load_repro_check,
                     run_repro_check)
 from .scanner import parse_excludes, run_scan
@@ -482,6 +483,15 @@ def cmd_tasks(db: Database, args) -> int:
 
 def cmd_timeline(db: Database, args) -> int:
     p = _resolve_project(db, args.project)
+    if args.format == "csv":
+        content = build_events_csv(db, project_id=p["id"])
+        if args.out:
+            with open(args.out, "w", encoding="utf-8-sig", newline="") as f:
+                f.write(content)
+            print(f"事件 CSV 已导出：{args.out}")
+        else:
+            sys.stdout.write(content)
+        return 0
     if args.out:
         r = export_timeline_markdown(db, p["id"], args.out)
         print(f"时间线已导出：{r['path']}（{r['snapshots']} 个快照）")
@@ -738,9 +748,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_tasks)
 
-    p = sub.add_parser("timeline", help="导出演化时间线 Markdown")
+    p = sub.add_parser("timeline", help="导出演化时间线（Markdown 或事件 CSV）")
     p.add_argument("project")
     p.add_argument("-o", "--out")
+    p.add_argument("--format", choices=["md", "csv"], default="md")
     p.set_defaults(func=cmd_timeline)
 
     p = sub.add_parser("forensics", help="导出完整取证报告（档案/线索/任务/复现/阶段）")

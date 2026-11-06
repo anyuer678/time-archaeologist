@@ -116,6 +116,15 @@ def main() -> int:
                 and "## 五、复现检查" in ftext and "评分规则（完全公开）" in ftext)
         print(f"PASS | 完整取证报告导出 · {len(ftext)} 字符")
 
+        csv_path = os.path.join(tmpdir, "events.csv")
+        fd.asksaveasfilename = lambda *a, **k: csv_path
+        mb.showinfo = lambda *a, **k: None
+        app.on_export_timeline_csv()
+        assert os.path.exists(csv_path)
+        csv_text = open(csv_path, encoding="utf-8-sig").read()
+        assert "observed_at_utc" in csv_text and "rel_path" in csv_text
+        print(f"PASS | 事件 CSV 导出 · {len(csv_text)} 字符")
+
         # ---- 项目级扫描排除（v7） ----
         import tkinter.simpledialog as sd
         sd.askstring = lambda *a, **k: ".git, node_modules"

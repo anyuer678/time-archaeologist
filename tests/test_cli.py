@@ -313,6 +313,19 @@ class CliTest(unittest.TestCase):
         code, out, err = self.run_cli("leads", "proj", "--detail", "99999")
         self.assertEqual(code, 2)
 
+    def test_timeline_csv(self):
+        self.scan()
+        out = Path(self.tmp.name) / "events.csv"
+        code, _, err = self.run_cli("timeline", "proj", "--format", "csv",
+                                    "-o", str(out))
+        self.assertEqual(code, 0, err)
+        text = out.read_text(encoding="utf-8-sig")
+        self.assertIn("observed_at_utc", text)
+        self.assertIn("src/train.py", text)
+        code, stdout, err = self.run_cli("timeline", "proj", "--format", "csv")
+        self.assertEqual(code, 0, err)
+        self.assertIn("observed_at_utc", stdout)
+
     def test_status_actions(self):
         self.scan()
         self.run_cli("analyze", "proj")

@@ -55,6 +55,7 @@ python -m time_arch repro <项目> <目标文件> --export 复现报告.md
 python -m time_arch repro <项目> --history            # 历史检查；--load ID 载入
 python -m time_arch tasks <项目> [--detail 5] [--export 任务清单.md]
 python -m time_arch timeline <项目> -o 时间线.md
+python -m time_arch timeline <项目> --format csv -o 事件.csv
 python -m time_arch milestones <项目> [--persist] [--confirm ID] [--remove ID]
 python -m time_arch phases <项目> [--add 名称] [--remove ID] [--json]
 python -m time_arch forensics <项目> -o 取证报告.md      # 2.0 完整取证报告
@@ -81,7 +82,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 3. **看结果**：主区十个页签——
    - **项目概览**：项目信息、最近活动、文件画像（各类别文件数 / 体积 / 最近文件时间）、快照历史。
    - **活动时间线**：全部事件，可按项目、事件类型、文件类别、关键词、日期范围过滤（即全局搜索），
-     每页 200 条分页加载。
+     每页 200 条分页加载；「导出 CSV…」按当前筛选导出（UTF-8 BOM，便于 Excel 打开）。
    - **最近发现**：全部项目最近 30 条事件。
    - **成果证据**：启发式识别的可执行文件 / 发布包 / 测试报告 / 实验产物 / 日志证据，
      附置信度与判断依据；可对每条做「人工确认」或「人工否决」。下半区是 **成果档案**：
@@ -150,7 +151,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（147 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（148 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -181,16 +182,16 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
   v0.1.0→v7 与 v5→v7 迁移等测试模块；含每条规则的正例、反例、边界与只读验证命令守卫）。
 - UI 冒烟：真实 Tk + 真实仓库全链路（线索→任务→图谱追踪→阶段确认→里程碑→任务人工确认/
   筛选/手动添加/导出）全部通过。
-- 2.0 页签冒烟（2026-11-05/06）：`scripts/ui_smoke_2.py` 12/12 通过——一键分析（关系→线索→
+- 2.0 页签冒烟（2026-11-05/06）：`scripts/ui_smoke_2.py` 13/13 通过——一键分析（关系→线索→
   档案→任务）并刷新页签；成果档案列表/详情/人工确认-否决-恢复自动；复现检查运行
   （demo_lab exp03，B 级 9 项）、评分规则常显、历史载入、复现报告导出、完整取证报告导出、
-  项目级扫描排除保存并传入扫描服务、全部项目摘要对话框、数据库完整性/备份/压缩、
-  空目标校验。原有 v0.1.0 冒烟 16/16 无回归。
-- 无头 CLI（2026-11-05/06）：`tests/test_cli.py` 14 项通过——扫描（`--exclude`、项目级
+  事件 CSV 导出、项目级扫描排除保存并传入扫描服务、全部项目摘要对话框、
+  数据库完整性/备份/压缩、空目标校验。原有 v0.1.0 冒烟 16/16 无回归。
+- 无头 CLI（2026-11-05/06）：`tests/test_cli.py` 15 项通过——扫描（`--exclude`、项目级
   `config` 排除）与项目解析（#ID/路径/名称）、跨项目 `overview`、`rules` 启停、
   里程碑保存/确认/删除、阶段建议查看与自定义阶段增删、分析汇总、
   线索/档案/任务列表与详情、复现检查运行/历史/载入/导出、
-  时间线/报告/取证报告导出、双快照对比与 Markdown 对比导出、
+  时间线 Markdown / 事件 CSV / 报告 / 取证报告导出、双快照对比与 Markdown 对比导出、
   数据库完整性检查/在线备份/压缩、人工状态变更（线索状态/任务完成与重开）、
   模块入口路由（`--version`/`--help` 不启动 GUI）、错误退出码；
   并已用 `scripts/demo_lab` 实跑 scan→analyze→leads→repro→dossiers 全链路。

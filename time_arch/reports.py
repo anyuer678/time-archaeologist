@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import csv
+import io
 import json
 from datetime import datetime, timezone
 
@@ -182,6 +184,29 @@ def build_diff_markdown(db: Database, old_id: int, new_id: int,
     if not (added or removed or modified):
         lines += ["（两次快照之间没有新增 / 删除 / 修改。）", ""]
     return "\n".join(lines) + "\n"
+
+
+def build_events_csv(db: Database, project_id: int | None = None,
+                     event_type: str | None = None, category: str | None = None,
+                     keyword: str | None = None, since: str | None = None,
+                     until: str | None = None, limit: int = 100000) -> str:
+    """事件时间线 CSV（机读；同时保留原始代码与中文标签）。"""
+    rows = db.list_events(project_id=project_id, event_type=event_type,
+                          category=category, keyword=keyword, since=since,
+                          until=until, limit=limit)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["observed_at_utc", "project", "event_type", "event_label",
+                     "certainty", "certainty_label", "rel_path", "category",
+                     "fs_mtime", "evidence_json"])
+    for e in rows:
+        writer.writerow([
+            e["observed_at"], e["project_name"], e["event_type"],
+            EVENT_LABELS.get(e["event_type"], e["event_type"]), e["certainty"],
+            CERTAINTY_LABELS.get(e["certainty"], e["certainty"]),
+            _norm_path(e["rel_path"]), e["category"], e["fs_mtime"], e["evidence"],
+        ])
+    return buf.getvalue()
 
 
 def export_report(db: Database, project_id: int, fmt: str, out_path: str) -> str:

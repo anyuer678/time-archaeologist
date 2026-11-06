@@ -25,7 +25,7 @@ from ..investigate import LEADS_RULES, RULE_LABELS, lead_view, run_lead_analysis
 from ..overview import project_summaries
 from ..phases import (MILESTONE_STATUS, export_timeline_markdown,
                       persist_milestone_suggestions, suggest_phases)
-from ..reports import build_diff_markdown, export_report
+from ..reports import build_diff_markdown, build_events_csv, export_report
 from ..repro import (ITEM_WEIGHTS, LEVEL_LABELS, LEVEL_POINTS, build_repro_report,
                      load_repro_check, run_repro_check, scoring_rules_text)
 from ..scanner import ScanProgress, ScanResult, ScanService, parse_excludes
@@ -240,6 +240,8 @@ class App:
         self.tl_until.pack(side="left", padx=(4, 12))
         ttk.Button(bar, text="查询", style="Accent.TButton", command=self.refresh_timeline
                    ).pack(side="left")
+        ttk.Button(bar, text="导出 CSV…", command=self.on_export_timeline_csv
+                   ).pack(side="left", padx=(6, 0))
         for w in (self.tl_keyword, self.tl_since, self.tl_until):
             w.bind("<Return>", lambda e: self.refresh_timeline())
         self.tl_hint = tk.StringVar(value="日期格式 YYYY-MM-DD（按观察时间过滤）。※标记为推测事件。")
@@ -1005,6 +1007,24 @@ class App:
     def _tl_turn(self, delta: int) -> None:
         self.tl_page = max(0, self.tl_page + delta)
         self.refresh_timeline()
+
+    def on_export_timeline_csv(self) -> None:
+        path = filedialog.asksaveasfilename(
+            parent=self.root, title="导出事件 CSV（按当前筛选）",
+            defaultextension=".csv", initialfile="events.csv",
+            filetypes=[("CSV", "*.csv"), ("所有文件", "*.*")])
+        if not path:
+            return
+        try:
+            content = build_events_csv(self.db, **self._tl_filter_values())
+            with open(path, "w", encoding="utf-8-sig", newline="") as f:
+                f.write(content)
+        except OSError as e:
+            messagebox.showerror("导出失败", str(e), parent=self.root)
+            return
+        messagebox.showinfo("导出完成",
+                            f"事件 CSV 已保存（按当前筛选）：\n{path}",
+                            parent=self.root)
 
     def refresh_recent(self) -> None:
         for t in self.recent_tree.get_children():
