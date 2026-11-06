@@ -236,6 +236,41 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("未知规则", err)
 
+    def test_detail_views(self):
+        self.scan()
+        self.run_cli("analyze", "proj")
+        db = Database(self.db_path)
+        lid = db.list_leads(1)[0]["id"]
+        code, out, err = self.run_cli("leads", "proj", "--detail", str(lid))
+        self.assertEqual(code, 0, err)
+        self.assertIn("触发原因", out)
+        self.assertIn("误报可能性", out)
+        tid = db.list_tasks(1)[0]["id"]
+        code, out, err = self.run_cli("tasks", "proj", "--detail", str(tid))
+        self.assertEqual(code, 0, err)
+        self.assertIn("为什么调查", out)
+        self.assertIn("完成条件", out)
+        aid = db.list_artifacts(1)[0]["id"]
+        code, out, err = self.run_cli("dossiers", "proj", "--detail", str(aid))
+        self.assertEqual(code, 0, err)
+        self.assertIn("已验证事实", out)
+        self.assertIn("完整性检查", out)
+        # 复现：运行 -> 历史 -> 载入
+        code, out, err = self.run_cli("repro", "proj", "runs/exp01/metrics.json")
+        self.assertEqual(code, 0, err)
+        code, out, err = self.run_cli("repro", "proj", "--history")
+        self.assertEqual(code, 0, err)
+        self.assertIn("复现检查历史", out)
+        rid = db.list_repro_checks(1)[0]["id"]
+        code, out, err = self.run_cli("repro", "proj", "--load", str(rid))
+        self.assertEqual(code, 0, err)
+        self.assertIn("评分规则", out)
+        code, out, err = self.run_cli("repro", "proj")
+        self.assertEqual(code, 2)
+        self.assertIn("请提供目标文件", err)
+        code, out, err = self.run_cli("leads", "proj", "--detail", "99999")
+        self.assertEqual(code, 2)
+
     def test_status_actions(self):
         self.scan()
         self.run_cli("analyze", "proj")

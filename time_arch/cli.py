@@ -8,10 +8,10 @@
   python -m time_arch scan <目录> [--name 名称] [--no-analyze]
   python -m time_arch analyze <项目ID或路径> [--snapshot N] [--only leads,relations,...]
   python -m time_arch report <项目> [--format markdown|json] [-o 文件]
-  python -m time_arch leads <项目> [--status open] [--json]
-  python -m time_arch dossiers <项目> [--json]
-  python -m time_arch repro <项目> <目标文件> [--export 报告.md] [--json]
-  python -m time_arch tasks <项目> [--status open] [--export 清单.md]
+  python -m time_arch leads <项目> [--detail ID] [--status open] [--json]
+  python -m time_arch dossiers <项目> [--detail ID] [--json]
+  python -m time_arch repro <项目> [目标文件] [--history] [--load ID] [--export 报告.md]
+  python -m time_arch tasks <项目> [--detail ID] [--status open] [--export 清单.md]
   python -m time_arch timeline <项目> [-o 时间线.md]
   python -m time_arch forensics <项目> [-o 取证报告.md]
   python -m time_arch diff <项目> [--json]
@@ -34,12 +34,13 @@ from .db import Database
 from .dossier import dossier_view, run_dossier_analysis
 from .forensics import build_forensics_markdown, export_forensics_markdown
 from .graph import run_relation_analysis
-from .investigate import LEADS_RULES, RULE_LABELS, run_lead_analysis
+from .investigate import LEADS_RULES, RULE_LABELS, lead_view, run_lead_analysis
 from .overview import project_summaries
 from .phases import (persist_milestone_suggestions, suggest_milestones,
                      suggest_phases, export_timeline_markdown)
 from .reports import build_diff_markdown, build_json, build_markdown, export_report
-from .repro import LEVEL_LABELS, build_repro_report, run_repro_check
+from .repro import (LEVEL_LABELS, build_repro_report, load_repro_check,
+                    run_repro_check)
 from .scanner import parse_excludes, run_scan
 from .tasks import TASK_STATUS, export_tasks_markdown, generate_tasks, task_view
 from .util import default_db_path, utcnow_iso
@@ -270,6 +271,27 @@ def cmd_report(db: Database, args) -> int:
 
 def cmd_leads(db: Database, args) -> int:
     p = _resolve_project(db, args.project)
+    if args.detail is not None:
+        v = lead_view(db, args.detail)
+        if v is None or v["project_id"] != p["id"]:
+            raise CliError(f"线索 #{args.detail} 不存在或不属于该项目")
+        if args.json:
+            _json_out(v)
+            return 0
+        print(f"线索 #{v['id']} · {v['rule_label']}（v{v['rule_version']}）"
+              f" · {LEAD_STATUS_LABELS.get(v['status'], v['status'])}")
+        print(f"问题描述：{v['title']}")
+        print(f"目标：{v['target_path'] or '—'} · 快照 #{v['snapshot_id']}"
+              f" · 生成于 {v['created_at']}")
+        print(f"触发原因：{v['basis']}")
+        for label, items in (("证据文件", v["evidence_list"]),
+                             ("可能的解释", v["possible_explanations"]),
+                             ("下一步建议", v["next_steps"])):
+            print(f"{label}：")
+            for x in items or ["（无）"]:
+                print(f"  - {x}")
+        print(f"误报可能性：{v['false_positive'] or '（未提供）'}")
+        return 0
     if args.set_status:
         raw_id, status = args.set_status
         if status not in LEAD_STATUS_LABELS:
@@ -297,6 +319,33 @@ def cmd_leads(db: Database, args) -> int:
 
 def cmd_dossiers(db: Database, args) -> int:
     p = _resolve_project(db, args.project)
+    if args.detail is not None:
+        v = dossier_view(db, args.detail)
+        if v is None or v["project_id"] != p["id"]:
+            raise CliError(f"档案 #{args.detail} 不存在或不属于该项目")
+        if args.json:
+            _json_out(v)
+            return 0
+        print(f"成果档案 #{v['id']} · {v['kind_label']} · {v['name']}")
+        print(f"状态：{v['status']} · 置信度：{v['confidence']}（启发式）"
+              f" · 主文件：{v['primary_path']}")
+        print(f"首次发现 {v['first_seen_at']} · 最近出现 {v['last_seen_at']}"
+              f" · 快照 #{v['snapshot_id']}")
+        print(f"识别依据：{v['basis']}")
+        for label, items in (("已验证事实", v["verified_facts"]),
+                             ("尚未验证的假设", v["unverified_assumptions"]),
+                             ("后续工作", v["next_steps"])):
+            print(f"{label}：")
+            for x in items or ["（无）"]:
+                print(f"  - {x}")
+        print("完整性检查：")
+        for c in v["completeness"] or [{"item": "（无）", "state": "-", "detail": ""}]:
+            print(f"  - [{c['state']}] {c['item']}：{c['detail']}")
+        print("关联文件：")
+        for f in v["files"] or [{"rel_path": "（无）", "role": "-", "in_snapshot": False}]:
+            mark = "" if f["in_snapshot"] else "（快照中无记录）"
+            print(f"  - [{f['role']}] {f['rel_path']}{mark}")
+        return 0
     rows = db.list_artifacts(p["id"])
     views = [v for v in (dossier_view(db, r["id"]) for r in rows) if v]
     if args.json:
@@ -313,8 +362,47 @@ def cmd_dossiers(db: Database, args) -> int:
     return 0
 
 
+def _print_repro_result(result: dict) -> None:
+    run_dir = f" · 运行目录 {result['run_dir']}" if result.get("run_dir") else ""
+    print(f"复现检查：{result['target_path']} · 快照 #{result['snapshot_id']}")
+    print(f"总级别：{LEVEL_LABELS.get(result['level'], result['level'])}"
+          f" · 总分 {result['score']}/100{run_dir}")
+    for c in result["checks"]:
+        print(f"  [{c['level']}] {c['item']}：{c['detail']}")
+    print("评分规则（完全公开）：")
+    for line in result.get("scoring_rules") or []:
+        print(f"  · {line}")
+
+
 def cmd_repro(db: Database, args) -> int:
     p = _resolve_project(db, args.project)
+    if args.history:
+        snap = _snapshot(db, p["id"], args.snapshot)
+        rows = db.list_repro_checks(p["id"], snap["id"], limit=200)
+        if args.json:
+            _json_out([dict(r) for r in rows])
+            return 0
+        print(f"复现检查历史（快照 #{snap['id']}）：{len(rows)} 条")
+        for r in rows:
+            print(f"#{r['id']} {r['target_path']} · {r['level']} · {r['score']}/100"
+                  f" · {r['generated_at']}")
+        return 0
+    if args.load is not None:
+        result = load_repro_check(db, args.load)
+        if result is None or result["project_id"] != p["id"]:
+            raise CliError(f"复现检查 #{args.load} 不存在或不属于该项目")
+        if args.export:
+            with open(args.export, "w", encoding="utf-8") as f:
+                f.write(build_repro_report(result))
+        if args.json:
+            _json_out(result)
+            return 0
+        _print_repro_result(result)
+        if args.export:
+            print(f"报告已导出：{args.export}")
+        return 0
+    if not args.target:
+        raise CliError("请提供目标文件，或使用 --history / --load ID")
     snap = _snapshot(db, p["id"], args.snapshot)
     result = run_repro_check(db, p["id"], snap["id"], args.target)
     if args.export:
@@ -323,14 +411,7 @@ def cmd_repro(db: Database, args) -> int:
     if args.json:
         _json_out(result)
         return 0
-    print(f"复现检查：{result['target_path']} · 快照 #{result['snapshot_id']}")
-    print(f"总级别：{LEVEL_LABELS.get(result['level'], result['level'])}"
-          f" · 总分 {result['score']}/100 · 运行目录 {result['run_dir']}")
-    for c in result["checks"]:
-        print(f"  [{c['level']}] {c['item']}：{c['detail']}")
-    print("评分规则（完全公开）：")
-    for line in result.get("scoring_rules") or []:
-        print(f"  · {line}")
+    _print_repro_result(result)
     if args.export:
         print(f"报告已导出：{args.export}")
     return 0
@@ -338,6 +419,31 @@ def cmd_repro(db: Database, args) -> int:
 
 def cmd_tasks(db: Database, args) -> int:
     p = _resolve_project(db, args.project)
+    if args.detail is not None:
+        v = task_view(db, args.detail)
+        if v is None or v["project_id"] != p["id"]:
+            raise CliError(f"任务 #{args.detail} 不存在或不属于该项目")
+        if args.json:
+            _json_out(v)
+            return 0
+        origin = "人工添加" if v["origin"] == "user" else (v["lead_rule_label"] or "由线索生成")
+        print(f"任务 #{v['id']} · {v['status_label']} · 来源：{origin}")
+        print(f"标题：{v['title']}")
+        print(f"为什么调查：{v['why']}")
+        for label, items in (("已有证据", v["evidence_list"]),
+                             ("人工操作", v["manual_steps_list"])):
+            print(f"{label}：")
+            for x in items or ["（无）"]:
+                print(f"  - {x}")
+        print(f"完成条件：{v['done_criteria'] or '（未提供）'}")
+        if v["verify_command"]:
+            print(f"只读验证建议（不会自动执行）：{v['verify_command']}"
+                  + (f" — {v['verify_desc']}" if v["verify_desc"] else ""))
+        if v["completed_at"]:
+            print(f"人工确认完成于：{v['completed_at']}")
+        if v["lead_current"] is False:
+            print("提示：关联线索来自旧快照，建议重跑分析确认。")
+        return 0
     actions = [("done", args.complete), ("open", args.reopen),
                ("dismissed", args.dismiss)]
     chosen = [(status, tid) for status, tid in actions if tid is not None]
@@ -510,32 +616,38 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--out")
     p.set_defaults(func=cmd_report)
 
-    p = sub.add_parser("leads", help="列出调查线索或变更其状态")
+    p = sub.add_parser("leads", help="列出调查线索或查看/变更状态")
     p.add_argument("project")
     p.add_argument("--status", choices=["open", "acknowledged", "dismissed"])
     p.add_argument("--rule")
+    p.add_argument("--detail", type=int, metavar="ID", help="查看单条线索的完整证据链")
     p.add_argument("--set-status", nargs=2, metavar=("ID", "STATUS"),
                    help="变更单条线索状态（人工操作）：open/acknowledged/dismissed")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_leads)
 
-    p = sub.add_parser("dossiers", help="列出成果档案")
+    p = sub.add_parser("dossiers", help="列出成果档案或查看单份详情")
     p.add_argument("project")
+    p.add_argument("--detail", type=int, metavar="ID", help="查看单份档案的完整证据链")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_dossiers)
 
-    p = sub.add_parser("repro", help="运行实验复现就绪度检查")
+    p = sub.add_parser("repro", help="运行/查看实验复现就绪度检查")
     p.add_argument("project")
-    p.add_argument("target", help="项目内相对路径（通常是运行目录中的结果文件）")
+    p.add_argument("target", nargs="?",
+                   help="项目内相对路径（通常是运行目录中的结果文件）")
     p.add_argument("--snapshot", type=int)
+    p.add_argument("--history", action="store_true", help="列出已保存的复现检查")
+    p.add_argument("--load", type=int, metavar="ID", help="载入已保存的检查结果")
     p.add_argument("--export", help="把 Markdown 报告写入该路径")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_repro)
 
-    p = sub.add_parser("tasks", help="列出/导出调查任务，或人工变更状态")
+    p = sub.add_parser("tasks", help="列出/导出调查任务，或查看/人工变更状态")
     p.add_argument("project")
     p.add_argument("--status", choices=["open", "done", "dismissed"])
     p.add_argument("--export", help="导出 Markdown 任务清单到该路径")
+    p.add_argument("--detail", type=int, metavar="ID", help="查看单项任务五要素")
     p.add_argument("--complete", type=int, metavar="ID",
                    help="人工确认完成（仅由你本人确认，系统不执行任务）")
     p.add_argument("--reopen", type=int, metavar="ID", help="重新打开任务")

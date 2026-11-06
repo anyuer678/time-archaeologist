@@ -49,10 +49,11 @@ python -m time_arch analyze <项目ID或路径>             # 关系/线索/档�
 python -m time_arch leads <项目> --set-status 12 acknowledged   # 人工变更线索状态
 python -m time_arch tasks <项目> --complete 5          # 人工确认完成（--reopen/--dismiss 可撤销）
 python -m time_arch report <项目> -o 报告.md           # v0.1.0 报告（--format json 亦可）
-python -m time_arch leads <项目> [--status open]      # 调查线索（--json 机读）
-python -m time_arch dossiers <项目> [--json]          # 成果档案
+python -m time_arch leads <项目> [--detail 12]        # 线索列表/详情（--json 机读）
+python -m time_arch dossiers <项目> [--detail 3]      # 成果档案列表/详情
 python -m time_arch repro <项目> <目标文件> --export 复现报告.md
-python -m time_arch tasks <项目> [--export 任务清单.md]
+python -m time_arch repro <项目> --history            # 历史检查；--load ID 载入
+python -m time_arch tasks <项目> [--detail 5] [--export 任务清单.md]
 python -m time_arch timeline <项目> -o 时间线.md
 python -m time_arch forensics <项目> -o 取证报告.md      # 2.0 完整取证报告
 python -m time_arch diff <项目> [--export 对比.md]     # 最近两次完成快照对比
@@ -146,7 +147,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（144 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（145 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -182,12 +183,13 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
   （demo_lab exp03，B 级 9 项）、评分规则常显、历史载入、复现报告导出、完整取证报告导出、
   项目级扫描排除保存并传入扫描服务、全部项目摘要对话框、空目标校验。
   原有 v0.1.0 冒烟 16/16 无回归。
-- 无头 CLI（2026-11-05/06）：`tests/test_cli.py` 11 项通过——扫描（`--exclude`、项目级
+- 无头 CLI（2026-11-05/06）：`tests/test_cli.py` 12 项通过——扫描（`--exclude`、项目级
   `config` 排除）与项目解析（#ID/路径/名称）、跨项目 `overview`、`rules` 启停、
-  分析汇总、线索/档案/任务列表、时间线/报告/取证报告导出、复现检查与报告导出、
-  双快照对比与 Markdown 对比导出、数据库完整性检查/在线备份/压缩、
-  人工状态变更（线索状态/任务完成与重开）、模块入口路由（`--version`/`--help` 不启动 GUI）、
-  错误退出码；并已用 `scripts/demo_lab` 实跑 scan→analyze→leads→repro→dossiers 全链路。
+  分析汇总、线索/档案/任务列表与详情、复现检查运行/历史/载入/导出、
+  时间线/报告/取证报告导出、双快照对比与 Markdown 对比导出、
+  数据库完整性检查/在线备份/压缩、人工状态变更（线索状态/任务完成与重开）、
+  模块入口路由（`--version`/`--help` 不启动 GUI）、错误退出码；
+  并已用 `scripts/demo_lab` 实跑 scan→analyze→leads→repro→dossiers 全链路。
 - 项目级扫描排除（2026-11-06）：v7 迁移为 projects 增加 excludes 列（旧库重复列容忍）；
   GUI「扫描选项…」与 CLI `config` 保存，`scan --exclude` 覆盖本次；`tests/test_db.py` /
   `tests/test_scanner.py` / `tests/test_cli.py` 覆盖默认值、持久化、应用与覆盖语义。
