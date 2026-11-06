@@ -184,8 +184,9 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
 
 2.0 验证记录（2026-10-27 初版；2026-11-05、2026-11-06 扩展后复验；Windows 11 x64，Python 3.12）：
 
-- 单元测试：`136 passed`（graph / dossier / repro / investigate / tasks / cli / forensics /
-  v0.1.0→v7 与 v5→v7 迁移等测试模块；含每条规则的正例、反例、边界与只读验证命令守卫）。
+- 单元测试：`154 passed`（graph / dossier / repro / investigate / tasks / cli / forensics /
+  overview / v0.1.0→v7 与 v5→v7 迁移等测试模块；含每条规则的正例、反例、边界与
+  只读验证命令守卫）。
 - UI 冒烟：真实 Tk + 真实仓库全链路（线索→任务→图谱追踪→阶段确认→里程碑→任务人工确认/
   筛选/手动添加/导出）全部通过。
 - 2.0 页签冒烟（2026-11-05/06）：`scripts/ui_smoke_2.py` 15/15 通过——一键分析（关系→线索→
@@ -250,9 +251,8 @@ time_arch/
 ├── phases.py    2.0 演化阶段 / 里程碑（机器建议与人工确认分开存档）
 ├── tasks.py     2.0 调查任务生成（由真实线索派生，人工确认完成）
 ├── overview.py  跨项目摘要（最新快照 / 待查看线索 / 待处理任务 / 档案数量）
-├── forensics.py 2.0 完整取证报告（档案/线索/任务/复现/阶段汇总为 Markdown）
-├── cli.py       无头命令行（projects/scan/analyze/report/leads/dossiers/repro/tasks/
-│                timeline/forensics/diff/maintain）
+├── forensics.py 2.0 完整取证报告（档案/线索/任务/复现/阶段汇总为 Markdown / JSON）
+├── cli.py       无头命令行（扫描/分析/搜索/导出/维护等全套子命令，见上文）
 ├── reports.py   Markdown / JSON 报告导出
 ├── util.py      时间/路径/长路径前缀等工具
 └── ui/          Tkinter 深色界面（theme.py 主题 + app.py 主窗口，十页签）
