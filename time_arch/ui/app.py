@@ -817,7 +817,7 @@ class App:
         p = self.db.get_project(pid)
         val = simpledialog.askstring(
             "扫描选项",
-            "按名称跳过的目录/文件（逗号分隔，如 .git,node_modules）：\n"
+            "按名称或通配符跳过的目录/文件（逗号分隔，如 .git,*.log）：\n"
             "留空表示扫描全部目录；下次扫描生效。",
             initialvalue=p["excludes"] or "", parent=self.root)
         if val is None:

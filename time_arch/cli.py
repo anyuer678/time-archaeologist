@@ -679,7 +679,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("config", help="查看/设置项目级扫描排除")
     p.add_argument("project")
     p.add_argument("--excludes", metavar="NAMES",
-                   help="逗号/分号分隔的目录或文件名称，如 .git,node_modules")
+                   help="逗号/分号分隔的名称或通配符，如 .git,*.log,build*")
     p.add_argument("--clear", action="store_true", help="清空排除设置")
     p.set_defaults(func=cmd_config)
 
@@ -689,7 +689,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-analyze", action="store_true", help="只扫描，不做成果启发式")
     p.add_argument("--progress", action="store_true", help="每秒输出一行扫描进度到 stderr")
     p.add_argument("--exclude", action="append", metavar="NAME",
-                   help="按名称跳过目录/文件（可多次或逗号分隔），如 .git,node_modules")
+                   help="按名称或通配符跳过目录/文件（可多次或逗号分隔），如 .git,*.log")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_scan)
 

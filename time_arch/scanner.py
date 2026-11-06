@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import os
 import threading
@@ -65,7 +66,7 @@ def _is_junction(entry) -> bool:
 
 
 def parse_excludes(text: str | None) -> set[str]:
-    """把逗号/分号分隔的排除设置解析为小写名称集合（空串 → 空集）。"""
+    """把逗号/分号分隔的排除名称或通配符解析为小写集合（空串 → 空集）。"""
     return {x.strip().lower() for x in (text or "").replace(";", ",").split(",")
             if x.strip()}
 
@@ -75,11 +76,12 @@ def iter_files(root: str, cancel_event: threading.Event | None,
                excludes: set[str] | None = None) -> Iterator[dict]:
     """迭代目录树中的文件（含符号链接记录，不跟随目录链接避免循环）。
 
-    excludes：按名称跳过的目录/文件（大小写不敏感，任意深度），如 .git、node_modules。
+    excludes：按名称或通配符跳过的目录/文件（大小写不敏感，任意深度），
+    如 .git、node_modules、*.log、build*。
     yields: {rel_path, abs_path, size, mtime, ext, category, is_symlink, link_target}
     """
     sep = os.sep
-    excluded = {e.lower() for e in (excludes or set())}
+    patterns = [e.lower() for e in (excludes or set())]
     stack: list[tuple[str, str]] = [(root, "")]
     while stack:
         cur_abs, cur_rel = stack.pop()
@@ -93,7 +95,7 @@ def iter_files(root: str, cancel_event: threading.Event | None,
             if cancel_event is not None and cancel_event.is_set():
                 raise ScanCancelled()
             name = sanitize_text(entry.name)
-            if excluded and name.lower() in excluded:
+            if patterns and any(fnmatch.fnmatchcase(name.lower(), p) for p in patterns):
                 continue
             abs_path = os.path.join(cur_abs, entry.name)
             rel_path = sanitize_text(f"{cur_rel}{sep}{name}" if cur_rel else name)

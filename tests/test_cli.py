@@ -74,6 +74,16 @@ class CliTest(unittest.TestCase):
         code, out, err = self.run_cli("scan", str(self.root), "--exclude", ".git", "--json")
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["files"], len(FILES))
+        # 通配符排除
+        code, out, err = self.run_cli("scan", str(self.root), "--exclude", "*.log", "--json")
+        self.assertEqual(code, 0, err)
+        db = Database(self.db_path)
+        latest = db.latest_snapshot(1)
+        paths = {r["rel_path"].replace("\\", "/") for r in
+                 db.query("SELECT rel_path FROM file_records WHERE snapshot_id=?",
+                          (latest["id"],))}
+        self.assertFalse(any(p.endswith("app.log") for p in paths))
+        self.assertTrue(any(p.endswith("README.md") for p in paths))
 
     def test_project_excludes_config(self):
         (self.root / ".git" / "objects").mkdir(parents=True)

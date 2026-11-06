@@ -76,6 +76,17 @@ class TestScanner(unittest.TestCase):
         self.assertEqual(len(recs2), len(self.files) + 2)
         self.assertTrue(any(p.startswith(".git") for p in recs2))
 
+    def test_glob_exclude_patterns(self):
+        (self.root / "build_cache").mkdir()
+        (self.root / "build_cache" / "x.txt").write_text("x", encoding="utf-8")
+        (self.root / "notes.tmp").write_text("n", encoding="utf-8")
+        res = run_scan(self.db, self.pid, excludes={"*.log", "build*", "*.tmp"})
+        recs = self._snapshot_files(res.snapshot_id)
+        self.assertNotIn(os.path.join("logs", "app.log"), recs)
+        self.assertFalse(any(p.startswith("build_cache") for p in recs))
+        self.assertNotIn("notes.tmp", recs)
+        self.assertIn("main.py", recs)
+
     def test_parse_excludes(self):
         self.assertEqual(parse_excludes(" .Git, node_modules;.venv ,, "),
                          {".git", "node_modules", ".venv"})

@@ -72,7 +72,8 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 **基本流程：**
 
 1. **登记项目**：左侧「登记项目」选择要考古的目录（只读，不会动里面任何文件），登记后可立即扫描。
-   可点「扫描选项…」按名称跳过 `.git`、`node_modules` 等目录（逗号分隔，留空=扫描全部）。
+   可点「扫描选项…」按名称或通配符跳过 `.git`、`node_modules`、`*.log` 等
+   （逗号分隔，留空=扫描全部）。
    点「全部项目摘要…」可查看各项目最新快照、待查看线索、待处理任务与档案数量。
    点「数据库维护…」可做完整性检查、在线备份与 VACUUM 压缩（只影响本机数据库）。
 2. **扫描**：选中项目后点「重新扫描」。顶部扫描状态条实时显示已扫描文件数、已哈希体积、
@@ -151,7 +152,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（148 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（149 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -196,8 +197,9 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
   模块入口路由（`--version`/`--help` 不启动 GUI）、错误退出码；
   并已用 `scripts/demo_lab` 实跑 scan→analyze→leads→repro→dossiers 全链路。
 - 项目级扫描排除（2026-11-06）：v7 迁移为 projects 增加 excludes 列（旧库重复列容忍）；
-  GUI「扫描选项…」与 CLI `config` 保存，`scan --exclude` 覆盖本次；`tests/test_db.py` /
-  `tests/test_scanner.py` / `tests/test_cli.py` 覆盖默认值、持久化、应用与覆盖语义。
+  GUI「扫描选项…」与 CLI `config` 保存，`scan --exclude` 覆盖本次；支持名称与通配符
+  （`*.log`、`build*`）；`tests/test_db.py` / `tests/test_scanner.py` / `tests/test_cli.py`
+  覆盖默认值、持久化、应用、覆盖与通配符语义。
 - 跨项目摘要与规则启停（2026-11-06）：`overview.py` 只读聚合最新快照 / 待查看线索 /
   待处理任务 / 档案数量（GUI「全部项目摘要…」+ CLI `overview`）；CLI `rules` 可启停
   8 条调查规则；`tests/test_overview.py` 与 `tests/test_cli.py` 覆盖。
@@ -270,9 +272,9 @@ scripts/         ui_smoke.py 冒烟、ui_smoke_2.py 2.0 页签冒烟、acceptanc
 - 成果识别基于路径/扩展名启发式；发布包仅只读读取 zip 中央目录核对成员，
   不解压、不执行，也不鉴定包内内容质量。
 - 文件时间线只回溯到首次登记时刻，无法考古登记之前的历史。
-- 扫描默认包含 .git 等目录中的全部文件（不解析版本库内部结构）；可按名称排除：
+- 扫描默认包含 .git 等目录中的全部文件（不解析版本库内部结构）；可按名称或通配符排除：
   GUI「扫描选项…」保存到项目，CLI `config` 设置，`scan --exclude` 仅覆盖本次扫描。
-  排除按名称匹配（大小写不敏感），不支持通配符或正则。
+  排除支持通配符（如 `*.log`、`build*`，大小写不敏感），不支持正则。
 - Windows 之外的平台界面字体/长路径行为未验证。
 
 ## 许可证
