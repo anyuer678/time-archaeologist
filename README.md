@@ -22,6 +22,16 @@ python run_app.py        # 或 python -m time_arch
 
 也可以直接双击目录下的 `启动时光考古机.bat`（找不到 Python 时会提示）。
 
+### 安装（可选）
+
+```bash
+python -m pip install .
+time-archaeologist        # 命令行（等价 python -m time_arch <子命令>）
+time-archaeologist-gui    # 图形界面
+```
+
+运行时仍零第三方依赖（仅标准库）；安装只是生成两个入口脚本，数据库位置不变。
+
 ### 无头命令行（可选）
 
 不启动图形界面，直接扫描/分析/导出（与 GUI 共用同一套只读 API）：
@@ -130,7 +140,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（136 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（138 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -174,6 +184,9 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
   档案/线索/任务/复现/阶段内容、无扫描项目可构建、导出与重跑确定性、快照范围与错误处理。
 - 发布包成员核对（2026-11-05）：成果档案只读读取 zip 中央目录——真实包列出成员并写入
   已验证事实，损坏/伪造包明确标为待调查（`tests/test_dossier_graph.py` 正反例）。
+- 打包（2026-11-06）：`pyproject.toml` 动态版本 2.0.0，wheel 实构建成功
+  （`time_archaeologist-2.0.0-py3-none-any.whl`，含 CLI/GUI 入口与 LICENSE）；
+  `tests/test_packaging.py` 2 项校验元数据与入口可导入。
 - 2.0 端到端验收 `19/19 PASS`（两个真实目录）：项目 A = 本仓库自身源码（软件项目，
   386 文件（含 .git 内部对象，随提交数变化）：68 关系边、反向追踪 46 节点、13 线索、
   12 档案、7 阶段片段、13 任务，重跑幂等）；
