@@ -38,6 +38,8 @@ time-archaeologist-gui    # 图形界面
 
 ```bash
 python -m time_arch projects                          # 列出已登记项目
+python -m time_arch overview [--json]                 # 跨项目摘要（线索/任务/档案数量）
+python -m time_arch rules [--enable RULE_ID] [--disable RULE_ID]  # 调查规则启停
 python -m time_arch config <项目> --excludes .git,node_modules   # 项目级排除（GUI 同项）
 python -m time_arch config <项目> --clear              # 清空排除设置
 python -m time_arch scan <目录> [--name 名称]          # 登记并扫描（默认同时做成果启发式）
@@ -67,6 +69,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 
 1. **登记项目**：左侧「登记项目」选择要考古的目录（只读，不会动里面任何文件），登记后可立即扫描。
    可点「扫描选项…」按名称跳过 `.git`、`node_modules` 等目录（逗号分隔，留空=扫描全部）。
+   点「全部项目摘要…」可查看各项目最新快照、待查看线索、待处理任务与档案数量。
 2. **扫描**：选中项目后点「重新扫描」。顶部扫描状态条实时显示已扫描文件数、已哈希体积、
    错误数和当前文件；随时可「取消扫描」（部分快照自动回滚，之后可安全重扫）。
    扫描完成后可点顶部「一键分析（2.0）」：依次运行关系图谱、调查线索、成果档案与任务生成
@@ -143,7 +146,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（141 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（144 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -174,19 +177,23 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
   v0.1.0→v7 与 v5→v7 迁移等测试模块；含每条规则的正例、反例、边界与只读验证命令守卫）。
 - UI 冒烟：真实 Tk + 真实仓库全链路（线索→任务→图谱追踪→阶段确认→里程碑→任务人工确认/
   筛选/手动添加/导出）全部通过。
-- 2.0 页签冒烟（2026-11-05/06）：`scripts/ui_smoke_2.py` 10/10 通过——一键分析（关系→线索→
+- 2.0 页签冒烟（2026-11-05/06）：`scripts/ui_smoke_2.py` 11/11 通过——一键分析（关系→线索→
   档案→任务）并刷新页签；成果档案列表/详情/人工确认-否决-恢复自动；复现检查运行
   （demo_lab exp03，B 级 9 项）、评分规则常显、历史载入、复现报告导出、完整取证报告导出、
-  项目级扫描排除保存并传入扫描服务、空目标校验。原有 v0.1.0 冒烟 16/16 无回归。
-- 无头 CLI（2026-11-05/06）：`tests/test_cli.py` 10 项通过——扫描（`--exclude`、项目级
-  `config` 排除）与项目解析（#ID/路径/名称）、分析汇总、线索/档案/任务列表、
-  时间线/报告/取证报告导出、复现检查与报告导出、双快照对比与 Markdown 对比导出、
-  数据库完整性检查/在线备份/压缩、人工状态变更（线索状态/任务完成与重开）、
-  模块入口路由（`--version`/`--help` 不启动 GUI）、错误退出码；并已用 `scripts/demo_lab`
-  实跑 scan→analyze→leads→repro→dossiers 全链路。
+  项目级扫描排除保存并传入扫描服务、全部项目摘要对话框、空目标校验。
+  原有 v0.1.0 冒烟 16/16 无回归。
+- 无头 CLI（2026-11-05/06）：`tests/test_cli.py` 11 项通过——扫描（`--exclude`、项目级
+  `config` 排除）与项目解析（#ID/路径/名称）、跨项目 `overview`、`rules` 启停、
+  分析汇总、线索/档案/任务列表、时间线/报告/取证报告导出、复现检查与报告导出、
+  双快照对比与 Markdown 对比导出、数据库完整性检查/在线备份/压缩、
+  人工状态变更（线索状态/任务完成与重开）、模块入口路由（`--version`/`--help` 不启动 GUI）、
+  错误退出码；并已用 `scripts/demo_lab` 实跑 scan→analyze→leads→repro→dossiers 全链路。
 - 项目级扫描排除（2026-11-06）：v7 迁移为 projects 增加 excludes 列（旧库重复列容忍）；
   GUI「扫描选项…」与 CLI `config` 保存，`scan --exclude` 覆盖本次；`tests/test_db.py` /
   `tests/test_scanner.py` / `tests/test_cli.py` 覆盖默认值、持久化、应用与覆盖语义。
+- 跨项目摘要与规则启停（2026-11-06）：`overview.py` 只读聚合最新快照 / 待查看线索 /
+  待处理任务 / 档案数量（GUI「全部项目摘要…」+ CLI `overview`）；CLI `rules` 可启停
+  8 条调查规则；`tests/test_overview.py` 与 `tests/test_cli.py` 覆盖。
 - 完整取证报告（2026-11-05）：`tests/test_forensics.py` 4 项通过——章节齐全、诚实边界声明、
   档案/线索/任务/复现/阶段内容、无扫描项目可构建、导出与重跑确定性、快照范围与错误处理。
 - 发布包成员核对（2026-11-05）：成果档案只读读取 zip 中央目录——真实包列出成员并写入
@@ -223,6 +230,7 @@ time_arch/
 ├── investigate.py 2.0 调查规则引擎（8 条规则，版本号 + 可启停）
 ├── phases.py    2.0 演化阶段 / 里程碑（机器建议与人工确认分开存档）
 ├── tasks.py     2.0 调查任务生成（由真实线索派生，人工确认完成）
+├── overview.py  跨项目摘要（最新快照 / 待查看线索 / 待处理任务 / 档案数量）
 ├── forensics.py 2.0 完整取证报告（档案/线索/任务/复现/阶段汇总为 Markdown）
 ├── cli.py       无头命令行（projects/scan/analyze/report/leads/dossiers/repro/tasks/
 │                timeline/forensics/diff/maintain）

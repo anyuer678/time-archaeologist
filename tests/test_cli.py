@@ -210,6 +210,32 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("至少指定", err)
 
+    def test_overview_and_rules(self):
+        self.scan()
+        self.run_cli("analyze", "proj")
+        code, out, err = self.run_cli("overview", "--json")
+        self.assertEqual(code, 0, err)
+        rows = json.loads(out)
+        self.assertEqual(len(rows), 1)
+        self.assertGreaterEqual(rows[0]["open_leads"], 1)
+        self.assertGreaterEqual(rows[0]["open_tasks"], 1)
+        self.assertGreaterEqual(rows[0]["artifacts"], 1)
+
+        code, out, err = self.run_cli("rules", "--json")
+        self.assertEqual(code, 0, err)
+        rules = json.loads(out)
+        self.assertEqual(len(rules), 8)
+        self.assertTrue(all(r["enabled"] for r in rules))
+        code, out, err = self.run_cli("rules", "--disable", "test_without_result")
+        self.assertEqual(code, 0, err)
+        self.assertFalse(Database(self.db_path).get_rule_enabled("test_without_result"))
+        code, out, err = self.run_cli("rules", "--enable", "test_without_result")
+        self.assertEqual(code, 0, err)
+        self.assertTrue(Database(self.db_path).get_rule_enabled("test_without_result"))
+        code, out, err = self.run_cli("rules", "--enable", "bogus_rule")
+        self.assertEqual(code, 2)
+        self.assertIn("未知规则", err)
+
     def test_status_actions(self):
         self.scan()
         self.run_cli("analyze", "proj")

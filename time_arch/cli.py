@@ -2,6 +2,8 @@
 
 典型用法（`--db` 需放在子命令之前；省略时用默认数据库）：
   python -m time_arch projects
+  python -m time_arch overview [--json]
+  python -m time_arch rules [--enable RULE_ID] [--disable RULE_ID]
   python -m time_arch config <项目> [--excludes .git,node_modules | --clear]
   python -m time_arch scan <目录> [--name 名称] [--no-analyze]
   python -m time_arch analyze <项目ID或路径> [--snapshot N] [--only leads,relations,...]
@@ -32,7 +34,8 @@ from .db import Database
 from .dossier import dossier_view, run_dossier_analysis
 from .forensics import build_forensics_markdown, export_forensics_markdown
 from .graph import run_relation_analysis
-from .investigate import RULE_LABELS, run_lead_analysis
+from .investigate import LEADS_RULES, RULE_LABELS, run_lead_analysis
+from .overview import project_summaries
 from .phases import (persist_milestone_suggestions, suggest_milestones,
                      suggest_phases, export_timeline_markdown)
 from .reports import build_diff_markdown, build_json, build_markdown, export_report
@@ -109,6 +112,48 @@ def cmd_projects(db: Database, args) -> int:
     for r in rows:
         print(f"{r['id']:>3}  {r['name'][:20]:<20} {r['snapshot_count']:>4} "
               f"{(r['last_scan_at'] or '-')[:19]:<20} {r['path']}")
+    return 0
+
+
+def cmd_overview(db: Database, args) -> int:
+    rows = project_summaries(db)
+    if args.json:
+        _json_out(rows)
+        return 0
+    if not rows:
+        print("（尚未登记任何项目）")
+        return 0
+    print(f"{'#':>3}  {'项目':<18} {'快照':>4} {'文件':>6} {'待查看线索':>6} "
+          f"{'待处理任务':>6} {'档案':>4} 最近扫描")
+    for r in rows:
+        snap = f"#{r['latest_snapshot_id']}" if r["latest_snapshot_id"] else "-"
+        print(f"{r['id']:>3}  {r['name'][:18]:<18} {snap:>4} {r['files']:>6} "
+              f"{r['open_leads']:>6} {r['open_tasks']:>6} {r['artifacts']:>4} "
+              f"{(r['last_scan_at'] or '-')[:19]}")
+    return 0
+
+
+def cmd_rules(db: Database, args) -> int:
+    known = {rid for rid, *_ in LEADS_RULES}
+    requested = (args.enable or []) + (args.disable or [])
+    for rid in requested:
+        if rid not in known:
+            raise CliError(f"未知规则：{rid}（可选：{', '.join(sorted(known))}）")
+    now = utcnow_iso()
+    for rid in args.enable or []:
+        db.set_rule_enabled(rid, True, now)
+    for rid in args.disable or []:
+        db.set_rule_enabled(rid, False, now)
+    rows = [{"rule_id": rid, "rule_version": ver, "description": desc,
+             "enabled": db.get_rule_enabled(rid)} for rid, ver, _fn, desc in LEADS_RULES]
+    if args.json:
+        _json_out(rows)
+        return 0
+    if requested:
+        print("规则状态已更新。")
+    for r in rows:
+        state = "启用" if r["enabled"] else "停用"
+        print(f"[{state}] {r['rule_id']}（v{r['rule_version']}）— {r['description']}")
     return 0
 
 
@@ -421,6 +466,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("projects", help="列出已登记项目")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_projects)
+
+    p = sub.add_parser("overview", help="跨项目摘要（快照/待查看线索/待处理任务/档案）")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_overview)
+
+    p = sub.add_parser("rules", help="查看/启停调查规则")
+    p.add_argument("--enable", action="append", metavar="RULE_ID")
+    p.add_argument("--disable", action="append", metavar="RULE_ID")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_rules)
 
     p = sub.add_parser("config", help="查看/设置项目级扫描排除")
     p.add_argument("project")

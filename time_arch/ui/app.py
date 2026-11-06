@@ -22,6 +22,7 @@ from ..graph import (RELATION_LABELS, RULES as GRAPH_RULES,
                      RULE_LABELS as GRAPH_RULE_LABELS,
                      run_relation_analysis, trace_relations)
 from ..investigate import LEADS_RULES, RULE_LABELS, lead_view, run_lead_analysis
+from ..overview import project_summaries
 from ..phases import (MILESTONE_STATUS, export_timeline_markdown,
                       persist_milestone_suggestions, suggest_phases)
 from ..reports import build_diff_markdown, export_report
@@ -115,6 +116,8 @@ class App:
                    command=self.on_register).pack(fill="x", pady=1)
         ttk.Button(btns, text="重新扫描", command=self.on_rescan).pack(fill="x", pady=1)
         ttk.Button(btns, text="扫描选项…", command=self.on_edit_excludes
+                   ).pack(fill="x", pady=1)
+        ttk.Button(btns, text="全部项目摘要…", command=self.on_project_overview
                    ).pack(fill="x", pady=1)
         ttk.Button(btns, text="移除项目", style="Danger.TButton",
                    command=self.on_remove).pack(fill="x", pady=1)
@@ -705,6 +708,22 @@ class App:
         self.db.remove_project(self.selected_project_id)
         self.selected_project_id = None
         self.refresh_projects(select_first=True)
+
+    def on_project_overview(self) -> None:
+        rows = project_summaries(self.db)
+        if not rows:
+            messagebox.showinfo("提示", "尚未登记任何项目。", parent=self.root)
+            return
+        lines = ["全部项目摘要（数量来自库内记录）", "",
+                 f"{'#':>3}  {'项目':<18} {'快照':>4} {'文件':>6} {'待查看线索':>6} "
+                 f"{'待处理任务':>6} {'档案':>4} 最近扫描", ""]
+        for r in rows:
+            snap = f"#{r['latest_snapshot_id']}" if r["latest_snapshot_id"] else "-"
+            lines.append(f"{r['id']:>3}  {r['name'][:18]:<18} {snap:>4} {r['files']:>6} "
+                         f"{r['open_leads']:>6} {r['open_tasks']:>6} {r['artifacts']:>4} "
+                         f"{(r['last_scan_at'] or '-')[:19]}")
+        lines += ["", "线索是「值得查看的问题」；任务完成状态由人工确认。"]
+        self._detail_dialog("全部项目摘要", "\n".join(lines))
 
     # ---------------------------------------------------------------- 扫描
     def on_rescan(self) -> None:

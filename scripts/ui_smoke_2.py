@@ -135,6 +135,15 @@ def main() -> int:
         assert captured.get("excludes") == {".git", "node_modules"}, captured
         print("PASS | 扫描排除设置保存并传入扫描服务")
 
+        app.on_project_overview()
+        root.update()
+        tops = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel)]
+        assert tops, "项目摘要对话框未创建"
+        for w in tops:
+            w.destroy()
+        root.update()
+        print("PASS | 全部项目摘要对话框")
+
         shown = []
         mb.showinfo = lambda title, msg, **k: shown.append(msg)
         app.rp_target.set("")
