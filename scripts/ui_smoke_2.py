@@ -4,6 +4,7 @@
 样例目录 scripts/demo_lab 是开发期构建的固定实验布局样例（真实磁盘文件，
 非用户科研数据）。数据库与导出报告均写入系统临时目录，不弄脏仓库。
 """
+import json
 import os
 import shutil
 import sys
@@ -109,12 +110,22 @@ def main() -> int:
 
         fs = os.path.join(tmpdir, "forensics.md")
         fd.asksaveasfilename = lambda *a, **k: fs
+        mb.askquestion = lambda *a, **k: "yes"
         app.on_export_forensics()
         assert os.path.exists(fs)
         ftext = open(fs, encoding="utf-8").read()
         assert ("# 项目取证报告" in ftext and "## 二、成果档案" in ftext
                 and "## 五、复现检查" in ftext and "评分规则（完全公开）" in ftext)
         print(f"PASS | 完整取证报告导出 · {len(ftext)} 字符")
+
+        js = os.path.join(tmpdir, "forensics.json")
+        fd.asksaveasfilename = lambda *a, **k: js
+        mb.askquestion = lambda *a, **k: "no"
+        app.on_export_forensics()
+        assert os.path.exists(js)
+        jd = json.loads(open(js, encoding="utf-8").read())
+        assert "artifacts" in jd and "tasks" in jd and "repro_checks" in jd
+        print("PASS | 取证报告 JSON 导出")
 
         csv_path = os.path.join(tmpdir, "events.csv")
         fd.asksaveasfilename = lambda *a, **k: csv_path

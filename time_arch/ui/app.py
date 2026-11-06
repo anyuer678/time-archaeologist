@@ -17,7 +17,7 @@ from ..analyze import KIND_LABELS
 from ..classify import CATEGORY_LABELS
 from ..db import Database
 from ..dossier import ARTIFACT_KINDS, ROLE_LABELS, dossier_view, run_dossier_analysis
-from ..forensics import export_forensics_markdown
+from ..forensics import export_forensics_json, export_forensics_markdown
 from ..graph import (RELATION_LABELS, RULES as GRAPH_RULES,
                      RULE_LABELS as GRAPH_RULE_LABELS,
                      run_relation_analysis, trace_relations)
@@ -2225,15 +2225,26 @@ class App:
                                 parent=self.root)
             return
         p = self.db.get_project(self.selected_project_id)
-        path = filedialog.asksaveasfilename(
-            title="导出完整取证报告", defaultextension=".md",
-            initialfile=f"{p['name']}_取证报告.md",
-            filetypes=[("Markdown", "*.md"), ("所有文件", "*.*")],
+        fmt = messagebox.askquestion(
+            "导出格式", "导出 Markdown 选择“是”，导出 JSON（机读）选择“否”。",
             parent=self.root)
+        if fmt == "yes":
+            ext, kind = ".md", "取证报告"
+            types = [("Markdown", "*.md"), ("所有文件", "*.*")]
+        else:
+            ext, kind = ".json", "取证报告"
+            types = [("JSON", "*.json"), ("所有文件", "*.*")]
+        path = filedialog.asksaveasfilename(
+            title="导出完整取证报告", defaultextension=ext,
+            initialfile=f"{p['name']}_{kind}{ext}",
+            filetypes=types, parent=self.root)
         if not path:
             return
         try:
-            export_forensics_markdown(self.db, self.selected_project_id, path)
+            if fmt == "yes":
+                export_forensics_markdown(self.db, self.selected_project_id, path)
+            else:
+                export_forensics_json(self.db, self.selected_project_id, path)
         except OSError as e:
             messagebox.showerror("导出失败", str(e), parent=self.root)
             return
