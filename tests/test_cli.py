@@ -168,6 +168,14 @@ class CliTest(unittest.TestCase):
         self.assertIn("## 二、成果档案", text)
         self.assertIn("## 四、调查任务", text)
 
+        fj = Path(self.tmp.name) / "forensics.json"
+        code, out, err = self.run_cli("forensics", "proj", "--json", "-o", str(fj))
+        self.assertEqual(code, 0, err)
+        data = json.loads(fj.read_text(encoding="utf-8"))
+        self.assertIn("artifacts", data)
+        self.assertIn("tasks", data)
+        self.assertIn("repro_checks", data)
+
     def test_repro_check_and_export(self):
         self.scan()
         report = Path(self.tmp.name) / "repro.md"

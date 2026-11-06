@@ -15,7 +15,7 @@
   python -m time_arch timeline <项目> [-o 时间线.md]
   python -m time_arch milestones <项目> [--persist] [--confirm ID] [--remove ID]
   python -m time_arch phases <项目> [--add LABEL] [--remove ID] [--json]
-  python -m time_arch forensics <项目> [-o 取证报告.md]
+  python -m time_arch forensics <项目> [-o 取证报告.md] [--json]
   python -m time_arch diff <项目> [--json]
   python -m time_arch maintain [--integrity] [--backup 备份.db] [--vacuum]
 
@@ -34,7 +34,8 @@ import time
 from . import __version__
 from .db import Database
 from .dossier import dossier_view, run_dossier_analysis
-from .forensics import build_forensics_markdown, export_forensics_markdown
+from .forensics import (build_forensics_json, build_forensics_markdown,
+                        export_forensics_markdown)
 from .graph import run_relation_analysis
 from .investigate import LEADS_RULES, RULE_LABELS, lead_view, run_lead_analysis
 from .overview import project_summaries
@@ -512,6 +513,15 @@ def cmd_timeline(db: Database, args) -> int:
 
 def cmd_forensics(db: Database, args) -> int:
     p = _resolve_project(db, args.project)
+    if args.json:
+        content = build_forensics_json(db, p["id"], args.snapshot)
+        if args.out:
+            with open(args.out, "w", encoding="utf-8") as f:
+                f.write(content)
+            print(f"取证报告（JSON）已导出：{args.out}")
+        else:
+            sys.stdout.write(content + "\n")
+        return 0
     if args.out:
         export_forensics_markdown(db, p["id"], args.out, args.snapshot)
         print(f"取证报告已导出：{args.out}")
@@ -754,10 +764,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--format", choices=["md", "csv"], default="md")
     p.set_defaults(func=cmd_timeline)
 
-    p = sub.add_parser("forensics", help="导出完整取证报告（档案/线索/任务/复现/阶段）")
+    p = sub.add_parser("forensics", help="导出完整取证报告（Markdown 或 JSON）")
     p.add_argument("project")
     p.add_argument("-o", "--out", help="默认输出到标准输出")
     p.add_argument("--snapshot", type=int)
+    p.add_argument("--json", action="store_true", help="输出机读 JSON")
     p.set_defaults(func=cmd_forensics)
 
     p = sub.add_parser("milestones", help="查看/确认/删除里程碑，或保存机器建议")

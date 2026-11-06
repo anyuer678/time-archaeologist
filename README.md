@@ -58,7 +58,7 @@ python -m time_arch timeline <项目> -o 时间线.md
 python -m time_arch timeline <项目> --format csv -o 事件.csv
 python -m time_arch milestones <项目> [--persist] [--confirm ID] [--remove ID]
 python -m time_arch phases <项目> [--add 名称] [--remove ID] [--json]
-python -m time_arch forensics <项目> -o 取证报告.md      # 2.0 完整取证报告
+python -m time_arch forensics <项目> -o 取证报告.md [--json]   # 2.0 完整取证报告
 python -m time_arch diff <项目> [--export 对比.md]     # 最近两次完成快照对比
 python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据库维护
 ```
@@ -143,8 +143,8 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
   依据可查（哪条规则、什么内容触发的判断）。
 - **演化阶段与里程碑**：机器建议与人工确认分开存档；阶段模型是可选假设，不强行套用。
 - **完整取证报告**：一键把成果档案、调查线索、任务、复现检查、阶段与里程碑汇总为
-  一份 Markdown（GUI 右上角「导出取证报告」或 CLI `forensics`），全部来自库内记录，
-  并附 mtime 声明、启发式标注与缺失证据说明。
+  一份 Markdown（GUI 右上角「导出取证报告」或 CLI `forensics`；`--json` 输出机读版），
+  全部来自库内记录，并附 mtime 声明、启发式标注与缺失证据说明。
 
 诚实边界：文件系统只能还原部分历史；mtime 不等于工作时长；所有自动判断均附证据来源，
 误报/漏报/无法判断都有明确的表达方式（线索的「误报可能性」、复现检查的 B/C/D 级）。
@@ -152,7 +152,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（149 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（150 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -203,8 +203,9 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
 - 跨项目摘要与规则启停（2026-11-06）：`overview.py` 只读聚合最新快照 / 待查看线索 /
   待处理任务 / 档案数量（GUI「全部项目摘要…」+ CLI `overview`）；CLI `rules` 可启停
   8 条调查规则；`tests/test_overview.py` 与 `tests/test_cli.py` 覆盖。
-- 完整取证报告（2026-11-05）：`tests/test_forensics.py` 4 项通过——章节齐全、诚实边界声明、
-  档案/线索/任务/复现/阶段内容、无扫描项目可构建、导出与重跑确定性、快照范围与错误处理。
+- 完整取证报告（2026-11-05/06）：`tests/test_forensics.py` 5 项通过——Markdown 章节齐全、
+  诚实边界声明、档案/线索/任务/复现/阶段内容、无扫描项目可构建、导出与重跑确定性、
+  快照范围与错误处理、JSON 机读版结构与导出。
 - 发布包成员核对（2026-11-05）：成果档案只读读取 zip 中央目录——真实包列出成员并写入
   已验证事实，损坏/伪造包明确标为待调查（`tests/test_dossier_graph.py` 正反例）。
 - 打包（2026-11-06）：`pyproject.toml` 动态版本 2.0.0，wheel 实构建成功

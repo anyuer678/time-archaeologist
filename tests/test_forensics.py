@@ -1,13 +1,15 @@
 """完整取证报告测试：汇总成果档案、线索、任务、复现检查、阶段与里程碑。"""
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from time_arch.db import Database
 from time_arch.dossier import run_dossier_analysis
-from time_arch.forensics import build_forensics_markdown, export_forensics_markdown
+from time_arch.forensics import (build_forensics_json, build_forensics_markdown,
+                                 export_forensics_json, export_forensics_markdown)
 from time_arch.graph import run_relation_analysis
 from time_arch.investigate import run_lead_analysis
 from time_arch.phases import persist_milestone_suggestions
@@ -86,6 +88,26 @@ class ForensicsTest(unittest.TestCase):
         export_forensics_markdown(self.db, self.pid, str(out))
         self.assertEqual(_strip_generated(out.read_text(encoding="utf-8")),
                          _strip_generated(a))
+
+    def test_json_report_and_export(self):
+        self.analyze_all()
+        data = json.loads(build_forensics_json(self.db, self.pid))
+        for key in ("project", "snapshot", "stats", "artifacts", "leads",
+                    "tasks", "repro_checks", "phase_suggestions",
+                    "milestones", "disclaimer", "generated_at"):
+            self.assertIn(key, data)
+        self.assertEqual(data["project"]["id"], self.pid)
+        self.assertEqual(data["snapshot"]["id"], self.snap)
+        self.assertTrue(data["artifacts"])
+        self.assertTrue(data["leads"])
+        self.assertTrue(data["tasks"])
+        self.assertTrue(data["repro_checks"])
+        self.assertTrue(data["phase_suggestions"])
+        self.assertIn("mtime", data["disclaimer"])
+        out = Path(self.tmp.name) / "forensics.json"
+        export_forensics_json(self.db, self.pid, str(out))
+        reloaded = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual(reloaded["project"]["id"], self.pid)
 
     def test_snapshot_scope_and_errors(self):
         second = run_scan(self.db, self.pid).snapshot_id

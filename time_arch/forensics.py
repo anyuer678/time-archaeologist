@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import json
+
 from .classify import CATEGORY_LABELS
 from .db import Database
 from .dossier import ROLE_LABELS, dossier_view
@@ -225,6 +227,62 @@ def export_forensics_markdown(db: Database, project_id: int, path: str,
                               snapshot_id: int | None = None) -> str:
     """写入 Markdown 取证报告并返回路径。"""
     content = build_forensics_markdown(db, project_id, snapshot_id)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return path
+
+
+def _resolve_report_snapshot(db: Database, project_id: int,
+                             snapshot_id: int | None):
+    if snapshot_id is not None:
+        for s in db.list_snapshots(project_id):
+            if s["id"] == snapshot_id:
+                return s
+        raise ValueError(f"快照 #{snapshot_id} 不存在或不属于该项目")
+    return db.latest_snapshot(project_id)
+
+
+def build_forensics_json(db: Database, project_id: int,
+                         snapshot_id: int | None = None) -> str:
+    """同一份取证数据的机读版本（档案/线索/任务/复现/阶段/里程碑 + 声明）。"""
+    project = db.get_project(project_id)
+    if project is None:
+        raise ValueError(f"项目不存在: {project_id}")
+    latest = _resolve_report_snapshot(db, project_id, snapshot_id)
+    stats = db.snapshot_stats(latest["id"]) if latest else None
+    artifacts = [v for v in (dossier_view(db, r["id"])
+                             for r in db.list_artifacts(project_id)) if v]
+    leads = []
+    if latest is not None:
+        leads = [v for v in (lead_view(db, r["id"])
+                             for r in db.list_leads(project_id, snapshot_id=latest["id"],
+                                                    limit=10000)) if v]
+    tasks = [v for v in (task_view(db, r["id"])
+                         for r in db.list_tasks(project_id, limit=10000)) if v]
+    checks = []
+    if latest is not None:
+        checks = [v for v in (load_repro_check(db, r["id"])
+                              for r in db.list_repro_checks(project_id, latest["id"],
+                                                            limit=200)) if v]
+    data = {
+        "generated_at": utcnow_iso(),
+        "project": dict(project),
+        "snapshot": dict(latest) if latest else None,
+        "stats": stats,
+        "artifacts": artifacts,
+        "leads": leads,
+        "tasks": tasks,
+        "repro_checks": checks,
+        "phase_suggestions": suggest_phases(db, project_id),
+        "milestones": [dict(r) for r in db.list_milestones(project_id)],
+        "disclaimer": DISCLAIMER,
+    }
+    return json.dumps(data, ensure_ascii=False, indent=2, default=str)
+
+
+def export_forensics_json(db: Database, project_id: int, path: str,
+                          snapshot_id: int | None = None) -> str:
+    content = build_forensics_json(db, project_id, snapshot_id)
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
     return path
