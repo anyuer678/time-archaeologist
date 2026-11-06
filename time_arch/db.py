@@ -256,6 +256,7 @@ class Database:
         """分级迁移：user_version 记录版本，全部语句幂等，旧数据零改动。
 
         - user_version=0 且已存在 projects 表 → v0.1.0 旧库，视为版本 1。
+        - 旧版本库升级前先在线备份到 `<db>.v<旧版本>.bak`，失败则中止。
         - 每个迁移级为有序 DDL 列表，单个事务内执行，失败整体回滚。
         """
         ver = conn.execute("PRAGMA user_version").fetchone()[0]
@@ -263,6 +264,8 @@ class Database:
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='projects'"
         ).fetchone():
             ver = 1  # v0.1.0 旧库：表已建但未记录版本
+        if 0 < ver < SCHEMA_VERSION:
+            self._backup_before_migration(conn, ver)
         for stmt in _BASE_STATEMENTS:
             conn.execute(stmt)
         for target in sorted(_MIGRATIONS):
@@ -276,6 +279,20 @@ class Database:
                         raise
         if ver < SCHEMA_VERSION:
             conn.execute(f"PRAGMA user_version={int(SCHEMA_VERSION)}")
+
+    def _backup_before_migration(self, conn: sqlite3.Connection,
+                                 old_version: int) -> None:
+        """升级前在线备份到 `<db>.v<旧版本>.bak`；失败则中止迁移，避免无备份改库。"""
+        dest = f"{self.path}.v{old_version}.bak"
+        try:
+            dst = sqlite3.connect(dest)
+            try:
+                conn.backup(dst)
+            finally:
+                dst.close()
+        except sqlite3.Error:
+            Path(dest).unlink(missing_ok=True)
+            raise
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=30.0)

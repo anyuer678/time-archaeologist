@@ -157,7 +157,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（154 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（155 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -184,7 +184,7 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
 
 2.0 验证记录（2026-10-27 初版；2026-11-05、2026-11-06 扩展后复验；Windows 11 x64，Python 3.12）：
 
-- 单元测试：`154 passed`（graph / dossier / repro / investigate / tasks / cli / forensics /
+- 单元测试：`155 passed`（graph / dossier / repro / investigate / tasks / cli / forensics /
   overview / v0.1.0→v7 与 v5→v7 迁移等测试模块；含每条规则的正例、反例、边界与
   只读验证命令守卫）。
 - UI 冒烟：真实 Tk + 真实仓库全链路（线索→任务→图谱追踪→阶段确认→里程碑→任务人工确认/
@@ -218,6 +218,9 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
   已验证事实，损坏/伪造包明确标为待调查（`tests/test_dossier_graph.py` 正反例）。
 - 复现检查自动关联档案（2026-11-06）：目标文件属于某成果档案的关联文件时，
   自动写入 artifact_id，便于从复现结果回溯档案证据（`tests/test_repro.py` 正反例）。
+- 升级前自动备份（2026-11-06）：打开 v0.1.0/v5 模拟旧库时自动生成 `<db>.v<旧版本>.bak`，
+  备份完整性与旧数据均验证可读；全新库/当前版本不生成备份
+  （`tests/test_db.py`、`tests/test_dossier_graph.py`、`tests/test_tasks.py`）。
 - 打包（2026-11-06）：`pyproject.toml` 动态版本 2.0.0，wheel 实构建成功
   （`time_archaeologist-2.0.0-py3-none-any.whl`，含 CLI/GUI 入口与 LICENSE）；
   `tests/test_packaging.py` 2 项校验元数据与入口可导入。
@@ -269,6 +272,8 @@ scripts/         ui_smoke.py 冒烟、ui_smoke_2.py 2.0 页签冒烟、acceptanc
 - 取消：worker 每读 1 MiB 检查一次取消标志，取消后回滚该次部分快照，可直接安全重扫。
 - 崩溃恢复：进程被硬杀后，WAL 保证库文件不损坏（已用子进程 `os._exit` 实测）；
   遗留的 running 扫描在下次打开数据库时自动标记 interrupted，可立即重扫。
+- 升级保护：打开旧版本数据库时，先在线备份到 `<db>.v<旧版本>.bak`，备份失败则中止升级；
+  当前版本与全新数据库不产生备份文件。
 
 ## 已知限制
 

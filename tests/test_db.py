@@ -38,6 +38,11 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(rows[0]["snapshot_count"], 1)
         self.assertIsNotNone(db2.latest_snapshot(pid))
 
+    def test_no_backup_for_fresh_or_current_db(self):
+        self.assertEqual(list(Path(self.tmp.name).glob("a.db.v*.bak")), [])
+        Database(Path(self.tmp.name) / "a.db")  # 当前版本重开不再备份
+        self.assertEqual(list(Path(self.tmp.name).glob("a.db.v*.bak")), [])
+
     def test_add_project_duplicate_path(self):
         p1, created1 = self.db.add_project("/x/y")
         p2, created2 = self.db.add_project("/x/y")

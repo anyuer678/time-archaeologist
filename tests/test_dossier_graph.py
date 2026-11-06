@@ -103,6 +103,15 @@ class TestMigrationCompat(unittest.TestCase):
 
         db = Database(db_path)  # 打开即迁移
         self.assertEqual(db.query("PRAGMA user_version")[0][0], SCHEMA_VERSION)
+        # 升级前自动备份：旧版本库写入 .v1.bak，内容完整可查
+        bak = Path(str(db_path) + ".v1.bak")
+        self.assertTrue(bak.exists())
+        bconn = sqlite3.connect(bak)
+        try:
+            self.assertEqual(bconn.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertEqual(bconn.execute("SELECT COUNT(*) FROM projects").fetchone()[0], 1)
+        finally:
+            bconn.close()
         old = db.get_project(1)
         self.assertIsNotNone(old)
         self.assertEqual(old["name"], "旧项目")
