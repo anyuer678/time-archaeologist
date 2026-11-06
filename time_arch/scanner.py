@@ -64,6 +64,12 @@ def _is_junction(entry) -> bool:
         return False
 
 
+def parse_excludes(text: str | None) -> set[str]:
+    """把逗号/分号分隔的排除设置解析为小写名称集合（空串 → 空集）。"""
+    return {x.strip().lower() for x in (text or "").replace(";", ",").split(",")
+            if x.strip()}
+
+
 def iter_files(root: str, cancel_event: threading.Event | None,
                on_error: Callable[[str, str], None],
                excludes: set[str] | None = None) -> Iterator[dict]:
@@ -367,14 +373,16 @@ class ScanService:
         return self._thread is not None and self._thread.is_alive()
 
     def start(self, project_id: int, on_done: Callable[[ScanResult], None],
-              on_progress: Callable[[ScanProgress], None] | None = None) -> bool:
+              on_progress: Callable[[ScanProgress], None] | None = None,
+              excludes: set[str] | None = None) -> bool:
         if self.busy:
             return False
         self._cancel = threading.Event()
 
         def worker():
             try:
-                result = run_scan(self.db, project_id, self._cancel, on_progress)
+                result = run_scan(self.db, project_id, self._cancel, on_progress,
+                                  excludes=excludes)
             except Exception as e:  # pragma: no cover - 兜底
                 result = ScanResult(run_id=-1, project_id=project_id, status="error",
                                     snapshot_id=None, error_messages=[str(e)])

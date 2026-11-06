@@ -18,7 +18,7 @@ from typing import Iterator
 
 from .util import utcnow_iso
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _BASE_STATEMENTS = [
     """CREATE TABLE IF NOT EXISTS projects (
@@ -92,8 +92,7 @@ _BASE_STATEMENTS = [
 ]
 
 # v2（2.0 第二步）：成果档案 + 证据关联。全部幂等，旧数据不动。
-_MIGRATIONS: dict[int, list[str]] = {
-    2: [
+_MIGRATIONS: dict[int, list[str]] = {    2: [
         """CREATE TABLE IF NOT EXISTS artifacts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -226,7 +225,14 @@ _MIGRATIONS: dict[int, list[str]] = {
     completed_at TEXT)""",
         "CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)",
     ],
+    # v7（2026-11-06）：项目级扫描排除设置（按名称跳过 .git/node_modules 等）。
+    7: [
+        "ALTER TABLE projects ADD COLUMN excludes TEXT NOT NULL DEFAULT ''",
+    ],
 }
+
+# 这些迁移级允许「目标列已存在」（旧库可能已手工加列），重复列错误视为已完成。
+_TOLERANT_DDL = {7}
 
 
 class Database:
@@ -262,7 +268,12 @@ class Database:
         for target in sorted(_MIGRATIONS):
             if ver < target:
                 for stmt in _MIGRATIONS[target]:
-                    conn.execute(stmt)
+                    try:
+                        conn.execute(stmt)
+                    except sqlite3.OperationalError as e:
+                        if target in _TOLERANT_DDL and "duplicate column name" in str(e):
+                            continue
+                        raise
         if ver < SCHEMA_VERSION:
             conn.execute(f"PRAGMA user_version={int(SCHEMA_VERSION)}")
 
@@ -337,7 +348,7 @@ class Database:
 
     def list_projects(self) -> list[sqlite3.Row]:
         sql = """
-        SELECT p.id, p.path, p.name, p.created_at, p.last_scan_at,
+        SELECT p.id, p.path, p.name, p.created_at, p.last_scan_at, p.excludes,
                (SELECT COUNT(*) FROM snapshots s WHERE s.project_id=p.id) AS snapshot_count,
                (SELECT s.id FROM snapshots s JOIN scan_runs r ON r.id=s.run_id
                  WHERE s.project_id=p.id AND r.status='completed'
@@ -347,6 +358,12 @@ class Database:
         FROM projects p ORDER BY p.name
         """
         return self.query(sql)
+
+    def set_project_excludes(self, project_id: int, excludes: str) -> None:
+        """保存项目级扫描排除（逗号分隔名称）；下次扫描生效。"""
+        with self._session(write=True) as conn:
+            conn.execute("UPDATE projects SET excludes=? WHERE id=?",
+                         (excludes, project_id))
 
     # ---------- 扫描运行 ----------
     def start_run(self, project_id: int) -> int:

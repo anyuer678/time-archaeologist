@@ -203,7 +203,7 @@ class TestGenerators(_Base):
 
 
 class TestMigration(_Base):
-    def test_v5_db_upgrades_to_v6_and_keeps_data(self):
+    def test_v5_db_upgrades_to_current_and_keeps_data(self):
         db_path = Path(self.tmp.name) / "old.db"
         db = Database(db_path)
         root = make_project({"runs/exp01/metrics.json": METRICS})
@@ -220,10 +220,11 @@ class TestMigration(_Base):
         conn.execute("PRAGMA user_version=5")
         conn.commit()
         conn.close()
-        db2 = Database(db_path)         # 重新打开 → 增量迁移到 v6
+        db2 = Database(db_path)         # 重新打开 → 增量迁移到当前版本
         self.assertEqual(db2.query("PRAGMA user_version")[0][0], SCHEMA_VERSION)
         # v5 时代的数据完好（v5 从未有任务表，任务数据随模拟 DROP 消失是预期）
         self.assertEqual(len(db2.list_projects()), 1)
+        self.assertEqual(db2.get_project(pid)["excludes"], "")
         self.assertEqual(len(db2.list_leads(pid)), 1)
         self.assertEqual(len(db2.list_tasks(pid)), 0)
         # v6 新表在迁移后立即可用

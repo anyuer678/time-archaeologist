@@ -27,7 +27,7 @@ from ..phases import (MILESTONE_STATUS, export_timeline_markdown,
 from ..reports import build_diff_markdown, export_report
 from ..repro import (ITEM_WEIGHTS, LEVEL_LABELS, LEVEL_POINTS, build_repro_report,
                      load_repro_check, run_repro_check, scoring_rules_text)
-from ..scanner import ScanProgress, ScanResult, ScanService
+from ..scanner import ScanProgress, ScanResult, ScanService, parse_excludes
 from ..tasks import (TASK_STATUS, export_tasks_markdown, generate_tasks,
                      task_view)
 from ..util import fmt_size, fmt_time_local, utcnow_iso
@@ -114,6 +114,8 @@ class App:
         ttk.Button(btns, text="登记项目", style="Accent.TButton",
                    command=self.on_register).pack(fill="x", pady=1)
         ttk.Button(btns, text="重新扫描", command=self.on_rescan).pack(fill="x", pady=1)
+        ttk.Button(btns, text="扫描选项…", command=self.on_edit_excludes
+                   ).pack(fill="x", pady=1)
         ttk.Button(btns, text="移除项目", style="Danger.TButton",
                    command=self.on_remove).pack(fill="x", pady=1)
 
@@ -711,19 +713,41 @@ class App:
             return
         self._start_scan(self.selected_project_id)
 
+    def on_edit_excludes(self) -> None:
+        pid = self.selected_project_id
+        if pid is None:
+            messagebox.showinfo("提示", "请先在左侧选择一个项目。", parent=self.root)
+            return
+        p = self.db.get_project(pid)
+        val = simpledialog.askstring(
+            "扫描选项",
+            "按名称跳过的目录/文件（逗号分隔，如 .git,node_modules）：\n"
+            "留空表示扫描全部目录；下次扫描生效。",
+            initialvalue=p["excludes"] or "", parent=self.root)
+        if val is None:
+            return
+        normalized = ",".join(sorted(parse_excludes(val)))
+        self.db.set_project_excludes(pid, normalized)
+        messagebox.showinfo(
+            "已保存", f"排除设置：{normalized or '（无）'}\n下次扫描生效。",
+            parent=self.root)
+
     def _start_scan(self, project_id: int) -> None:
         if self.service.busy or self._scan_running:
             messagebox.showinfo("提示", "已有扫描正在进行。", parent=self.root)
             return
         p = self.db.get_project(project_id)
+        excludes = parse_excludes(p["excludes"])
         self._scan_running = True
         self.btn_cancel.configure(state="normal")
         self.scan_progress.start(24)
-        self.scan_label_var.set(f"扫描状态：正在扫描「{p['name']}」… 准备中")
+        skip = f"（跳过 {len(excludes)} 类名称）" if excludes else ""
+        self.scan_label_var.set(f"扫描状态：正在扫描「{p['name']}」… 准备中{skip}")
         ok = self.service.start(
             project_id,
             on_done=lambda r: self.scan_queue.put(("done", r)),
             on_progress=lambda pr: self.scan_queue.put(("progress", pr)),
+            excludes=excludes or None,
         )
         if not ok:
             self._scan_idle()

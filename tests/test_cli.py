@@ -75,6 +75,41 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["files"], len(FILES))
 
+    def test_project_excludes_config(self):
+        (self.root / ".git" / "objects").mkdir(parents=True)
+        (self.root / ".git" / "objects" / "aa").write_text("x", encoding="utf-8")
+        (self.root / "node_modules" / "pkg").mkdir(parents=True)
+        (self.root / "node_modules" / "pkg" / "i.js").write_text("y", encoding="utf-8")
+        self.scan()
+        code, out, err = self.run_cli("config", "proj")
+        self.assertEqual(code, 0, err)
+        self.assertIn("（无）", out)
+        code, out, err = self.run_cli("config", "proj", "--excludes", ".git")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(Database(self.db_path).get_project(1)["excludes"], ".git")
+        # 不传 --exclude 时应用项目设置：跳过 .git，保留 node_modules
+        code, out, err = self.run_cli("scan", str(self.root), "--json")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["files"], len(FILES) + 1)
+        # --exclude 覆盖项目设置（本次只跳 node_modules）
+        code, out, err = self.run_cli("scan", str(self.root),
+                                      "--exclude", "node_modules", "--json")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["files"], len(FILES) + 1)
+        db = Database(self.db_path)
+        latest = db.latest_snapshot(1)
+        paths = {r["rel_path"].replace("\\", "/") for r in
+                 db.query("SELECT rel_path FROM file_records WHERE snapshot_id=?",
+                          (latest["id"],))}
+        self.assertTrue(any(p.startswith(".git/") for p in paths))
+        self.assertFalse(any(p.startswith("node_modules/") for p in paths))
+        code, out, err = self.run_cli("config", "proj", "--clear")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(Database(self.db_path).get_project(1)["excludes"], "")
+        code, out, err = self.run_cli("config", "proj", "--excludes", ".git", "--clear")
+        self.assertEqual(code, 2)
+        self.assertIn("只能指定一个", err)
+
     def test_analyze_lists_and_exports(self):
         self.scan()
         code, out, err = self.run_cli("analyze", "proj", "--json")

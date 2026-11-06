@@ -12,7 +12,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from time_arch.db import Database
-from time_arch.scanner import ScanCancelled, run_scan
+from time_arch.scanner import ScanCancelled, parse_excludes, run_scan
 
 
 def make_tree(base: Path) -> dict:
@@ -75,6 +75,12 @@ class TestScanner(unittest.TestCase):
         recs2 = self._snapshot_files(res2.snapshot_id)
         self.assertEqual(len(recs2), len(self.files) + 2)
         self.assertTrue(any(p.startswith(".git") for p in recs2))
+
+    def test_parse_excludes(self):
+        self.assertEqual(parse_excludes(" .Git, node_modules;.venv ,, "),
+                         {".git", "node_modules", ".venv"})
+        self.assertEqual(parse_excludes(None), set())
+        self.assertEqual(parse_excludes(""), set())
 
     def test_readonly_guarantee(self):
         before = {p: (p.stat().st_mtime_ns, p.stat().st_size, hashlib.sha256(p.read_bytes()).hexdigest())

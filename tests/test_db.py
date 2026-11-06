@@ -6,8 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from time_arch.db import Database
-
+from time_arch.db import Database, SCHEMA_VERSION
 
 class TestDatabase(unittest.TestCase):
     def setUp(self):
@@ -45,6 +44,16 @@ class TestDatabase(unittest.TestCase):
         self.assertTrue(created1)
         self.assertFalse(created2)
         self.assertEqual(p1, p2)
+
+    def test_project_excludes_default_and_persist(self):
+        pid, _ = self.db.add_project("/x/y")
+        self.assertEqual(self.db.get_project(pid)["excludes"], "")
+        self.db.set_project_excludes(pid, ".git,node_modules")
+        self.assertEqual(self.db.get_project(pid)["excludes"], ".git,node_modules")
+        self.assertEqual(self.db.list_projects()[0]["excludes"], ".git,node_modules")
+        db2 = Database(Path(self.tmp.name) / "a.db")  # 重开后仍在
+        self.assertEqual(db2.get_project(pid)["excludes"], ".git,node_modules")
+        self.assertEqual(db2.query("PRAGMA user_version")[0][0], SCHEMA_VERSION)
 
     def test_interrupted_run_recovery(self):
         pid, _, _ = self._seed()

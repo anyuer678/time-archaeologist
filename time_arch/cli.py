@@ -2,6 +2,7 @@
 
 典型用法（`--db` 需放在子命令之前；省略时用默认数据库）：
   python -m time_arch projects
+  python -m time_arch config <项目> [--excludes .git,node_modules | --clear]
   python -m time_arch scan <目录> [--name 名称] [--no-analyze]
   python -m time_arch analyze <项目ID或路径> [--snapshot N] [--only leads,relations,...]
   python -m time_arch report <项目> [--format markdown|json] [-o 文件]
@@ -36,7 +37,7 @@ from .phases import (persist_milestone_suggestions, suggest_milestones,
                      suggest_phases, export_timeline_markdown)
 from .reports import build_diff_markdown, build_json, build_markdown, export_report
 from .repro import LEVEL_LABELS, build_repro_report, run_repro_check
-from .scanner import run_scan
+from .scanner import parse_excludes, run_scan
 from .tasks import TASK_STATUS, export_tasks_markdown, generate_tasks, task_view
 from .util import default_db_path, utcnow_iso
 
@@ -111,19 +112,36 @@ def cmd_projects(db: Database, args) -> int:
     return 0
 
 
+def cmd_config(db: Database, args) -> int:
+    p = _resolve_project(db, args.project)
+    if args.excludes is not None and args.clear:
+        raise CliError("--excludes 与 --clear 只能指定一个")
+    if args.excludes is None and not args.clear:
+        print(f"项目 #{p['id']}「{p['name']}」排除设置：{p['excludes'] or '（无）'}")
+        return 0
+    value = "" if args.clear else ",".join(sorted(parse_excludes(args.excludes)))
+    db.set_project_excludes(p["id"], value)
+    print(f"已保存排除设置：{value or '（无）'}（下次扫描生效）")
+    return 0
+
+
 def cmd_scan(db: Database, args) -> int:
     root = os.path.abspath(os.path.expanduser(args.path))
     if not os.path.isdir(root):
         raise CliError(f"目录不存在或不可访问：{root}")
     pid, created = db.add_project(root, args.name)
-    excludes: set[str] = set()
+    flag_excludes: set[str] = set()
     for raw in args.exclude or []:
-        excludes.update(x.strip().lower() for x in raw.split(",") if x.strip())
+        flag_excludes |= parse_excludes(raw)
+    stored_excludes = parse_excludes(db.get_project(pid)["excludes"])
+    excludes = flag_excludes or stored_excludes
     if not args.json:
         print(f"{'已登记' if created else '已存在'}项目 #{pid}"
               f"「{db.get_project(pid)['name']}」")
-        if excludes:
-            print(f"按名称跳过：{', '.join(sorted(excludes))}")
+        if flag_excludes:
+            print(f"按名称跳过（本次）：{', '.join(sorted(flag_excludes))}")
+        elif stored_excludes:
+            print(f"按名称跳过（项目设置）：{', '.join(sorted(stored_excludes))}")
     progress = None
     if args.progress and not args.json:
         last = [0.0]
@@ -403,6 +421,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("projects", help="列出已登记项目")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_projects)
+
+    p = sub.add_parser("config", help="查看/设置项目级扫描排除")
+    p.add_argument("project")
+    p.add_argument("--excludes", metavar="NAMES",
+                   help="逗号/分号分隔的目录或文件名称，如 .git,node_modules")
+    p.add_argument("--clear", action="store_true", help="清空排除设置")
+    p.set_defaults(func=cmd_config)
 
     p = sub.add_parser("scan", help="登记并扫描一个目录")
     p.add_argument("path")

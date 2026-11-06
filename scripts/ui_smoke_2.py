@@ -116,6 +116,25 @@ def main() -> int:
                 and "## 五、复现检查" in ftext and "评分规则（完全公开）" in ftext)
         print(f"PASS | 完整取证报告导出 · {len(ftext)} 字符")
 
+        # ---- 项目级扫描排除（v7） ----
+        import tkinter.simpledialog as sd
+        sd.askstring = lambda *a, **k: ".git, node_modules"
+        mb.showinfo = lambda *a, **k: None
+        app.on_edit_excludes()
+        assert db.get_project(pid)["excludes"] == ".git,node_modules"
+        captured = {}
+
+        def fake_start(project_id, on_done, on_progress=None, excludes=None):
+            captured["excludes"] = excludes
+            return False
+
+        orig_start = app.service.start
+        app.service.start = fake_start
+        app.on_rescan()
+        app.service.start = orig_start
+        assert captured.get("excludes") == {".git", "node_modules"}, captured
+        print("PASS | 扫描排除设置保存并传入扫描服务")
+
         shown = []
         mb.showinfo = lambda title, msg, **k: shown.append(msg)
         app.rp_target.set("")

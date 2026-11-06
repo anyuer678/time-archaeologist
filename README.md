@@ -38,6 +38,8 @@ time-archaeologist-gui    # 图形界面
 
 ```bash
 python -m time_arch projects                          # 列出已登记项目
+python -m time_arch config <项目> --excludes .git,node_modules   # 项目级排除（GUI 同项）
+python -m time_arch config <项目> --clear              # 清空排除设置
 python -m time_arch scan <目录> [--name 名称]          # 登记并扫描（默认同时做成果启发式）
 python -m time_arch scan <目录> --progress             # 长扫描时每秒输出进度到 stderr
 python -m time_arch scan <目录> --exclude .git,node_modules  # 按名称跳过目录
@@ -64,6 +66,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 **基本流程：**
 
 1. **登记项目**：左侧「登记项目」选择要考古的目录（只读，不会动里面任何文件），登记后可立即扫描。
+   可点「扫描选项…」按名称跳过 `.git`、`node_modules` 等目录（逗号分隔，留空=扫描全部）。
 2. **扫描**：选中项目后点「重新扫描」。顶部扫描状态条实时显示已扫描文件数、已哈希体积、
    错误数和当前文件；随时可「取消扫描」（部分快照自动回滚，之后可安全重扫）。
    扫描完成后可点顶部「一键分析（2.0）」：依次运行关系图谱、调查线索、成果档案与任务生成
@@ -140,7 +143,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（138 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（141 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
@@ -165,21 +168,25 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
   发起后台扫描（UI → worker 线程 → 队列轮询 → 完成回调 → 自动选中项目 → 刷新）
   并验证事件入库。
 
-2.0 验证记录（2026-10-27 初版，2026-11-05 扩展后复验；Windows 11 x64，Python 3.12）：
+2.0 验证记录（2026-10-27 初版；2026-11-05、2026-11-06 扩展后复验；Windows 11 x64，Python 3.12）：
 
 - 单元测试：`136 passed`（graph / dossier / repro / investigate / tasks / cli / forensics /
-  v0.1.0→v6 与 v5→v6 迁移等测试模块；含每条规则的正例、反例、边界与只读验证命令守卫）。
+  v0.1.0→v7 与 v5→v7 迁移等测试模块；含每条规则的正例、反例、边界与只读验证命令守卫）。
 - UI 冒烟：真实 Tk + 真实仓库全链路（线索→任务→图谱追踪→阶段确认→里程碑→任务人工确认/
   筛选/手动添加/导出）全部通过。
-- 2.0 页签冒烟（2026-11-05）：`scripts/ui_smoke_2.py` 9/9 通过——一键分析（关系→线索→
+- 2.0 页签冒烟（2026-11-05/06）：`scripts/ui_smoke_2.py` 10/10 通过——一键分析（关系→线索→
   档案→任务）并刷新页签；成果档案列表/详情/人工确认-否决-恢复自动；复现检查运行
   （demo_lab exp03，B 级 9 项）、评分规则常显、历史载入、复现报告导出、完整取证报告导出、
-  空目标校验。原有 v0.1.0 冒烟 16/16 无回归。
-- 无头 CLI（2026-11-05）：`tests/test_cli.py` 9 项通过——扫描（含 `--exclude` 目录跳过）与
-  项目解析（#ID/路径/名称）、分析汇总、线索/档案/任务列表、时间线/报告/取证报告导出、
-  复现检查与报告导出、双快照对比与 Markdown 对比导出、数据库完整性检查/在线备份/压缩、
-  人工状态变更（线索状态/任务完成与重开）、模块入口路由（`--version`/`--help` 不启动 GUI）、
-  错误退出码；并已用 `scripts/demo_lab` 实跑 scan→analyze→leads→repro→dossiers 全链路。
+  项目级扫描排除保存并传入扫描服务、空目标校验。原有 v0.1.0 冒烟 16/16 无回归。
+- 无头 CLI（2026-11-05/06）：`tests/test_cli.py` 10 项通过——扫描（`--exclude`、项目级
+  `config` 排除）与项目解析（#ID/路径/名称）、分析汇总、线索/档案/任务列表、
+  时间线/报告/取证报告导出、复现检查与报告导出、双快照对比与 Markdown 对比导出、
+  数据库完整性检查/在线备份/压缩、人工状态变更（线索状态/任务完成与重开）、
+  模块入口路由（`--version`/`--help` 不启动 GUI）、错误退出码；并已用 `scripts/demo_lab`
+  实跑 scan→analyze→leads→repro→dossiers 全链路。
+- 项目级扫描排除（2026-11-06）：v7 迁移为 projects 增加 excludes 列（旧库重复列容忍）；
+  GUI「扫描选项…」与 CLI `config` 保存，`scan --exclude` 覆盖本次；`tests/test_db.py` /
+  `tests/test_scanner.py` / `tests/test_cli.py` 覆盖默认值、持久化、应用与覆盖语义。
 - 完整取证报告（2026-11-05）：`tests/test_forensics.py` 4 项通过——章节齐全、诚实边界声明、
   档案/线索/任务/复现/阶段内容、无扫描项目可构建、导出与重跑确定性、快照范围与错误处理。
 - 发布包成员核对（2026-11-05）：成果档案只读读取 zip 中央目录——真实包列出成员并写入
@@ -188,7 +195,7 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
   （`time_archaeologist-2.0.0-py3-none-any.whl`，含 CLI/GUI 入口与 LICENSE）；
   `tests/test_packaging.py` 2 项校验元数据与入口可导入。
 - 2.0 端到端验收 `19/19 PASS`（两个真实目录）：项目 A = 本仓库自身源码（软件项目，
-  386 文件（含 .git 内部对象，随提交数变化）：68 关系边、反向追踪 46 节点、13 线索、
+  398 文件（含 .git 内部对象，随提交数变化）：74 关系边、反向追踪 48 节点、13 线索、
   12 档案、7 阶段片段、13 任务，重跑幂等）；
   项目 B = 仓库自带实验布局样例 `scripts/demo_lab`（真实磁盘文件，开发期构建的固定样例，
   非用户科研数据）：复现检查 exp03 等级 B / exp04 等级 C（各 9 项 A/B/C 分级检查 +
@@ -204,9 +211,10 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
 ```
 time_arch/
 ├── db.py        SQLite 持久层（projects / scan_runs / snapshots / file_records /
-│                events / findings；每操作短事务；打开时自动把遗留 running 标记 interrupted）
-├── scanner.py   只读扫描（自写 scandir 栈式遍历，跳过符号链接目录；SHA-256 分块
-│                可取消；分批提交；取消/异常回滚快照；对比生成事件）
+│                events / findings；v7 项目级排除设置；每操作短事务；打开时把遗留
+│                running 标记 interrupted）
+├── scanner.py   只读扫描（自写 scandir 栈式遍历，跳过符号链接目录；可按名称排除
+│                目录/文件；SHA-256 分块可取消；分批提交；取消/异常回滚快照；对比生成事件）
 ├── classify.py  文件类别启发式（源码/配置/测试/文档/日志/数据/构建产物）
 ├── analyze.py   成果考古启发式（可执行文件/发布包/测试报告/实验产物/日志证据）
 ├── graph.py     2.0 关系图谱（5 条关系规则，边带 source+confidence，支持反向追踪）
@@ -247,8 +255,9 @@ scripts/         ui_smoke.py 冒烟、ui_smoke_2.py 2.0 页签冒烟、acceptanc
 - 成果识别基于路径/扩展名启发式；发布包仅只读读取 zip 中央目录核对成员，
   不解压、不执行，也不鉴定包内内容质量。
 - 文件时间线只回溯到首次登记时刻，无法考古登记之前的历史。
-- 扫描默认包含 .git 等目录中的全部文件（不解析版本库内部结构）；命令行可用
-  `--exclude .git,node_modules` 按名称跳过，GUI 暂未提供该选项。
+- 扫描默认包含 .git 等目录中的全部文件（不解析版本库内部结构）；可按名称排除：
+  GUI「扫描选项…」保存到项目，CLI `config` 设置，`scan --exclude` 仅覆盖本次扫描。
+  排除按名称匹配（大小写不敏感），不支持通配符或正则。
 - Windows 之外的平台界面字体/长路径行为未验证。
 
 ## 许可证
