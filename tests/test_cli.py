@@ -356,6 +356,26 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("observed_at_utc", stdout)
 
+    def test_remove_project_and_search(self):
+        self.scan()
+        code, out, err = self.run_cli("search", "train", "--json")
+        self.assertEqual(code, 0, err)
+        rows = json.loads(out)
+        self.assertTrue(any("train.py" in r["rel_path"] for r in rows))
+        code, out, err = self.run_cli("search", "train", "--project", "proj")
+        self.assertEqual(code, 0, err)
+        self.assertIn("train.py", out)
+        code, out, err = self.run_cli("search", "no-such-name-xyz", "--json")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out), [])
+        code, out, err = self.run_cli("projects", "--remove", "1")
+        self.assertEqual(code, 2)
+        self.assertIn("--yes", err)
+        code, out, err = self.run_cli("projects", "--remove", "1", "--yes")
+        self.assertEqual(code, 0, err)
+        self.assertIsNone(Database(self.db_path).get_project(1))
+        self.assertEqual(Database(self.db_path).list_projects(), [])
+
     def test_status_actions(self):
         self.scan()
         self.run_cli("analyze", "proj")

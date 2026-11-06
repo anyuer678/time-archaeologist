@@ -1,7 +1,8 @@
 """无头命令行入口：不启动 Tk，复用与 GUI 完全相同的只读扫描与分析 API。
 
 典型用法（`--db` 需放在子命令之前；省略时用默认数据库）：
-  python -m time_arch projects
+  python -m time_arch projects [--remove ID --yes]
+  python -m time_arch search <关键词> [--project 项目] [--json]
   python -m time_arch overview [--json]
   python -m time_arch rules [--enable RULE_ID] [--disable RULE_ID]
   python -m time_arch config <项目> [--name 新名] [--excludes .git,*.log | --clear]
@@ -106,6 +107,16 @@ def _parse_json_fields(d: dict, fields: tuple[str, ...]) -> dict:
 
 # ---------------------------------------------------------------- 子命令实现
 def cmd_projects(db: Database, args) -> int:
+    if args.remove is not None:
+        if not args.yes:
+            raise CliError(f"移除项目 #{args.remove} 会清除其快照/事件记录"
+                           "（不会删除磁盘文件）；请加 --yes 确认")
+        p = db.get_project(args.remove)
+        if p is None:
+            raise CliError(f"项目 #{args.remove} 不存在")
+        db.remove_project(args.remove)
+        print(f"已移除项目 #{args.remove}「{p['name']}」（磁盘文件未改动）")
+        return 0
     rows = db.list_projects()
     if args.json:
         _json_out([dict(r) for r in rows])
@@ -159,6 +170,21 @@ def cmd_rules(db: Database, args) -> int:
     for r in rows:
         state = "启用" if r["enabled"] else "停用"
         print(f"[{state}] {r['rule_id']}（v{r['rule_version']}）— {r['description']}")
+    return 0
+
+
+def cmd_search(db: Database, args) -> int:
+    pid = None
+    if args.project:
+        pid = _resolve_project(db, args.project)["id"]
+    rows = db.list_events(project_id=pid, keyword=args.keyword, limit=args.limit)
+    if args.json:
+        _json_out([_parse_json_fields(dict(r), ("evidence",)) for r in rows])
+        return 0
+    print(f"关键词「{args.keyword}」：{len(rows)} 条事件")
+    for e in rows:
+        print(f"{e['observed_at'][:19]}  [{e['event_type']}]  "
+              f"{e['project_name']}  {e['rel_path']}")
     return 0
 
 
@@ -681,9 +707,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"Time Archaeologist {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("projects", help="列出已登记项目")
+    p = sub.add_parser("projects", help="列出已登记项目或移除项目")
+    p.add_argument("--remove", type=int, metavar="ID", help="移除项目及其库内记录")
+    p.add_argument("--yes", action="store_true", help="确认移除（不动磁盘文件）")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_projects)
+
+    p = sub.add_parser("search", help="按关键词搜索事件（可跨项目）")
+    p.add_argument("keyword")
+    p.add_argument("--project")
+    p.add_argument("--limit", type=int, default=200)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_search)
 
     p = sub.add_parser("overview", help="跨项目摘要（快照/待查看线索/待处理任务/档案）")
     p.add_argument("--json", action="store_true")
