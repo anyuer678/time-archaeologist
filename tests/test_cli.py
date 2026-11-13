@@ -66,6 +66,25 @@ class CliTest(unittest.TestCase):
         code, out, _ = self.run_cli("leads", "proj")
         self.assertEqual(code, 0)
 
+    def test_scan_with_analyze_chain(self):
+        # --analyze：扫描完成后自动运行 2.0 一键分析链（关系→线索→档案→任务）
+        code, out, err = self.run_cli("scan", str(self.root), "--analyze", "--json")
+        self.assertEqual(code, 0, err)
+        a = json.loads(out)["analysis"]
+        self.assertGreaterEqual(a["relations_edges"], 1)  # tests↔src 模块关系边
+        self.assertIn("leads", a)
+        self.assertIn("tasks_total", a)
+        # 幂等：重复扫描+分析，关系边计数不漂移
+        code, out, err = self.run_cli("scan", str(self.root), "--analyze", "--json")
+        self.assertEqual(code, 0, err)
+        a2 = json.loads(out)["analysis"]
+        self.assertEqual(a2["relations_edges"], a["relations_edges"])
+
+    def test_scan_analyze_text_output(self):
+        code, out, err = self.run_cli("scan", str(self.root), "--analyze")
+        self.assertEqual(code, 0, err)
+        self.assertIn("2.0 一键分析", out)
+
     def test_scan_exclude(self):
         (self.root / ".git" / "objects").mkdir(parents=True)
         (self.root / ".git" / "objects" / "aa").write_text("x", encoding="utf-8")
