@@ -66,6 +66,33 @@ class CliTest(unittest.TestCase):
         code, out, _ = self.run_cli("leads", "proj")
         self.assertEqual(code, 0)
 
+    def test_timeline_csv_filters(self):
+        import csv as _csv
+        self.scan()
+        # --keyword 过滤：只留路径含 train.py 的事件（train.log 不含 .py 不命中）
+        code, out, err = self.run_cli("timeline", "proj", "--format", "csv",
+                                      "--keyword", "train.py")
+        self.assertEqual(code, 0, err)
+        rows = list(_csv.reader(io.StringIO(out)))
+        self.assertEqual(rows[0][0], "observed_at_utc")
+        self.assertEqual(sorted(r[6] for r in rows[1:]),
+                         ["src/train.py", "tests/test_train.py"])
+        # --category 过滤
+        code, out, err = self.run_cli("timeline", "proj", "--format", "csv",
+                                      "--category", "test")
+        self.assertEqual(code, 0, err)
+        rows = list(_csv.reader(io.StringIO(out)))
+        self.assertEqual([r[6] for r in rows[1:]], ["tests/test_train.py"])
+        # --until 早于全部事件 → 仅表头
+        code, out, err = self.run_cli("timeline", "proj", "--format", "csv",
+                                      "--until", "2020-01-01")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(list(_csv.reader(io.StringIO(out)))), 1)
+        # 过滤参数配 md 格式 → 参数错误（退出码 2）
+        code, out, err = self.run_cli("timeline", "proj", "--type", "file_added")
+        self.assertEqual(code, 2)
+        self.assertIn("仅支持", err)
+
     def test_scan_exclude(self):
         (self.root / ".git" / "objects").mkdir(parents=True)
         (self.root / ".git" / "objects" / "aa").write_text("x", encoding="utf-8")
