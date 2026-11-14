@@ -265,6 +265,18 @@ def cmd_config(db: Database, args) -> int:
     return 0
 
 
+def run_full_analysis(db: Database, project_id: int, snapshot_id: int) -> dict:
+    """2.0 一键分析链（与 GUI「一键分析（2.0）」一致）：关系→线索→档案→任务。"""
+    summary: dict = {}
+    summary["relations_edges"] = run_relation_analysis(db, project_id, snapshot_id)["edges"]
+    summary["leads"] = run_lead_analysis(db, project_id, snapshot_id)["leads"]
+    summary["dossiers"] = run_dossier_analysis(db, project_id, snapshot_id)["total"]
+    t = generate_tasks(db, project_id, snapshot_id)
+    summary.update({"tasks_created": t["created"], "tasks_updated": t["updated"],
+                    "tasks_total": t["total"]})
+    return summary
+
+
 def cmd_scan(db: Database, args) -> int:
     root = os.path.abspath(os.path.expanduser(args.path))
     if not os.path.isdir(root):
@@ -304,6 +316,10 @@ def cmd_scan(db: Database, args) -> int:
         "events_created": result.events_created,
         "findings_created": result.findings_created,
     }
+    analysis = None
+    if getattr(args, "analyze", False):
+        analysis = run_full_analysis(db, pid, result.snapshot_id)
+        data["analysis"] = analysis
     if args.json:
         _json_out(data)
         return 0
@@ -311,6 +327,10 @@ def cmd_scan(db: Database, args) -> int:
     print(f"扫描完成：快照 #{result.snapshot_id}，{result.files} 个文件{cached}，"
           f"错误 {result.errors}，新增事件 {result.events_created}，"
           f"成果线索 {result.findings_created}")
+    if analysis is not None:
+        print(f"2.0 一键分析：关系边 {analysis['relations_edges']}，线索 {analysis['leads']}，"
+              f"档案 {analysis['dossiers']}，任务新增 {analysis['tasks_created']}"
+              f"（共 {analysis['tasks_total']}）")
     return 0
 
 
@@ -810,6 +830,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("path")
     p.add_argument("--name")
     p.add_argument("--no-analyze", action="store_true", help="只扫描，不做成果启发式")
+    p.add_argument("--analyze", action="store_true",
+                   help="扫描完成后自动运行 2.0 一键分析（关系→线索→档案→任务）")
     p.add_argument("--progress", action="store_true", help="每秒输出一行扫描进度到 stderr")
     p.add_argument("--exclude", action="append", metavar="NAME",
                    help="按名称或通配符跳过目录/文件（可多次或逗号分隔），如 .git,*.log")

@@ -47,7 +47,7 @@ python -m time_arch rules [--enable RULE_ID] [--disable RULE_ID]  # 调查规则
 python -m time_arch config <项目> --excludes .git,node_modules   # 项目级排除（GUI 同项）
 python -m time_arch config <项目> --name 新名称         # 重命名项目（仅本机库）
 python -m time_arch config <项目> --clear              # 清空排除设置
-python -m time_arch scan <目录> [--name 名称]          # 登记并扫描（默认同时做成果启发式）
+python -m time_arch scan <目录> [--name 名称] [--analyze]  # 登记并扫描（默认做成果启发式；--analyze 扫后自动跑 2.0 一键分析：关系/线索/档案/任务）
 python -m time_arch scan <目录> --progress             # 长扫描时每秒输出进度到 stderr
 python -m time_arch scan <目录> --exclude .git,node_modules  # 按名称跳过目录
 python -m time_arch analyze <项目ID或路径>             # 关系/线索/档案/任务/阶段建议
@@ -172,7 +172,7 @@ python -m time_arch maintain --integrity --backup 备份.db --vacuum  # 数据�
 ## 测试与验收
 
 ```bash
-python -m pytest tests/ -q            # 单元测试（163 个；亦可用 unittest discover）
+python -m pytest tests/ -q            # 单元测试（165 个；亦可用 unittest discover）
 python scripts/ui_smoke.py                # UI 冒烟（真实异步扫描全链路）
 python scripts/ui_smoke_2.py              # 2.0 UI 冒烟（成果档案 + 复现检查页签）
 python scripts/acceptance_check.py        # v0.1.0 端到端验收（22 项，含性能实测）
