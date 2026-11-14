@@ -16,6 +16,8 @@
   python -m time_arch repro <项目> [目标文件] [--history] [--load ID] [--export 报告.md]
   python -m time_arch tasks <项目> [--detail ID] [--status open] [--export 清单.md]
   python -m time_arch timeline <项目> [-o 时间线.md]
+  python -m time_arch timeline <项目> --format csv [--type 类型] [--category 类别]
+                                     [--keyword 关键词] [--since 起始] [--until 截止]
   python -m time_arch milestones <项目> [--persist] [--confirm ID] [--remove ID]
   python -m time_arch phases <项目> [--add LABEL] [--remove ID] [--json]
   python -m time_arch forensics <项目> [-o 取证报告.md] [--json]
@@ -594,8 +596,14 @@ def cmd_tasks(db: Database, args) -> int:
 
 def cmd_timeline(db: Database, args) -> int:
     p = _resolve_project(db, args.project)
+    has_filter = any([args.type, args.category, args.keyword, args.since, args.until])
+    if args.format != "csv" and has_filter:
+        raise CliError("过滤参数（--type/--category/--keyword/--since/--until）仅支持"
+                       " --format csv（对齐 GUI 按当前筛选导出事件）")
     if args.format == "csv":
-        content = build_events_csv(db, project_id=p["id"])
+        content = build_events_csv(db, project_id=p["id"], event_type=args.type,
+                                   category=args.category, keyword=args.keyword,
+                                   since=args.since, until=args.until)
         if args.out:
             with open(args.out, "w", encoding="utf-8-sig", newline="") as f:
                 f.write(content)
@@ -894,6 +902,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_tasks)
 
     p = sub.add_parser("timeline", help="导出演化时间线（Markdown 或事件 CSV）")
+    p.add_argument("--type", help="按事件类型过滤（file_added/file_removed/file_modified，仅 csv）")
+    p.add_argument("--category", help="按文件类别过滤：source/config/test/doc/log/data/build/other（仅 csv）")
+    p.add_argument("--keyword", help="按路径关键词过滤（仅 csv）")
+    p.add_argument("--since", help="起始时间 YYYY-MM-DD[ HH:MM:SS]（仅 csv）")
+    p.add_argument("--until", help="截止时间 YYYY-MM-DD[ HH:MM:SS]（仅 csv）")
     p.add_argument("project")
     p.add_argument("-o", "--out")
     p.add_argument("--format", choices=["md", "csv"], default="md")

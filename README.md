@@ -61,6 +61,7 @@ python -m time_arch repro <项目> --history            # 历史检查；--load 
 python -m time_arch tasks <项目> [--detail 5] [--export 任务清单.md]
 python -m time_arch timeline <项目> -o 时间线.md
 python -m time_arch timeline <项目> --format csv -o 事件.csv
+python -m time_arch timeline <项目> --format csv --type file_added --category source --since 2026-11-01 -o 近期源码变更.csv  # CSV 支持按类型/类别/关键词/时间窗过滤（对齐 GUI 筛选）
 python -m time_arch milestones <项目> [--persist] [--confirm ID] [--remove ID]
 python -m time_arch phases <项目> [--add 名称] [--remove ID] [--json]
 python -m time_arch forensics <项目> -o 取证报告.md [--json]   # 2.0 完整取证报告
