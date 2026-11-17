@@ -47,8 +47,8 @@ from .investigate import LEADS_RULES, RULE_LABELS, lead_view, run_lead_analysis
 from .overview import project_summaries
 from .phases import (persist_milestone_suggestions, suggest_milestones,
                      suggest_phases, export_timeline_markdown)
-from .reports import (build_diff_markdown, build_events_csv, build_json,
-                      build_markdown, export_report)
+from .reports import (EVENT_LABELS, build_diff_markdown, build_events_csv,
+                      build_json, build_markdown, export_report)
 from .repro import (LEVEL_LABELS, build_repro_report, load_repro_check,
                     run_repro_check)
 from .scanner import parse_excludes, run_scan
@@ -902,7 +902,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_tasks)
 
     p = sub.add_parser("timeline", help="导出演化时间线（Markdown 或事件 CSV）")
-    p.add_argument("--type", help="按事件类型过滤（file_added/file_removed/file_modified，仅 csv）")
+    p.add_argument("--type", choices=sorted(EVENT_LABELS),
+                   help="按事件类型过滤（" + "/".join(sorted(EVENT_LABELS)) + "，仅 csv）")
     p.add_argument("--category", help="按文件类别过滤：source/config/test/doc/log/data/build/other（仅 csv）")
     p.add_argument("--keyword", help="按路径关键词过滤（仅 csv）")
     p.add_argument("--since", help="起始时间 YYYY-MM-DD[ HH:MM:SS]（仅 csv）")
@@ -960,7 +961,10 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
-    args = build_parser().parse_args(argv)
+    try:
+        args = build_parser().parse_args(argv)
+    except SystemExit as e:  # argparse 的 --help/参数错误统一转为返回码
+        return int(e.code) if isinstance(e.code, int) else 0
     db = Database(args.db or default_db_path())
     try:
         return args.func(db, args)

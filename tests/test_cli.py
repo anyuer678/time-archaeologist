@@ -84,6 +84,7 @@ class CliTest(unittest.TestCase):
         code, out, err = self.run_cli("scan", str(self.root), "--analyze")
         self.assertEqual(code, 0, err)
         self.assertIn("2.0 一键分析", out)
+
     def test_timeline_csv_filters(self):
         import csv as _csv
         self.scan()
@@ -110,6 +111,10 @@ class CliTest(unittest.TestCase):
         code, out, err = self.run_cli("timeline", "proj", "--type", "file_added")
         self.assertEqual(code, 2)
         self.assertIn("仅支持", err)
+        # 未知事件类型直接参数错误（choices 校验）
+        code, out, err = self.run_cli("timeline", "proj", "--format", "csv",
+                                      "--type", "bogus_type")
+        self.assertEqual(code, 2)
 
     def test_scan_exclude(self):
         (self.root / ".git" / "objects").mkdir(parents=True)

@@ -200,9 +200,9 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
 
 2.x 验证记录（2026-10-27 初版；2026-11-05、2026-11-06 扩展后复验；Windows 11 x64，Python 3.12）：
 
-- 单元测试：`163 passed`（graph / dossier / repro / investigate / tasks / cli / forensics /
-  overview / gitmeta / v0.1.0→v8 与 v5→v8 迁移等测试模块；含每条规则的正例、反例、边界与
-  只读验证命令守卫）。
+- 单元测试：`183 passed`（graph / dossier / repro / investigate / tasks / cli / forensics /
+  overview / gitmeta / util / v0.1.0→v8 与 v5→v8 迁移等测试模块；含每条规则的正例、
+  反例、边界与只读验证命令守卫）。
 - UI 冒烟：真实 Tk + 真实仓库全链路（线索→任务→图谱追踪→阶段确认→里程碑→任务人工确认/
   筛选/手动添加/导出）全部通过。
 - 2.0 页签冒烟（2026-11-05/06）：`scripts/ui_smoke_2.py` 17/17 通过——快照人工备注、
@@ -211,15 +211,16 @@ python scripts/perf_check.py              # 2.0 性能基准（3000 文件合成
   完整取证报告 Markdown/JSON 导出、事件 CSV 导出、项目级扫描排除保存并传入扫描服务、
   项目重命名、全部项目摘要对话框、Git 痕迹（非 Git 项目提示）、
   数据库完整性/备份/压缩、空目标校验。原有 v0.1.0 冒烟 16/16 无回归。
-- 无头 CLI（2026-11-05/06）：`tests/test_cli.py` 19 项通过——扫描（`--exclude`、项目级
-  `config` 排除）与项目解析（#ID/路径/名称）、项目移除（显式 `--yes`）、跨项目搜索、
-  快照备注、Git 元数据（gitmeta）、`overview`、`rules` 启停、项目重命名、
-  里程碑保存/确认/删除、阶段建议查看与自定义阶段增删、分析汇总、
-  线索/档案/任务列表与详情、复现检查运行/历史/载入/导出、
-  时间线 Markdown / 事件 CSV / 报告 / 取证报告（Markdown+JSON）导出、
-  双快照对比与 Markdown 对比导出、数据库完整性检查/在线备份/压缩、
-  人工状态变更（线索状态/任务完成与重开）、模块入口路由（`--version`/`--help` 不启动 GUI）、
-  错误退出码；并已用 `scripts/demo_lab` 实跑 scan→analyze→leads→repro→dossiers 全链路。
+- 无头 CLI（2026-11-05/06）：`tests/test_cli.py` 22 项通过——扫描（`--exclude`、项目级
+  `config` 排除、`--analyze` 扫后自动跑 2.0 分析链）与项目解析（#ID/路径/名称）、
+  项目移除（显式 `--yes`）、跨项目搜索、快照备注、Git 元数据（gitmeta）、
+  `overview`、`rules` 启停、项目重命名、里程碑保存/确认/删除、
+  阶段建议查看与自定义阶段增删、分析汇总、线索/档案/任务列表与详情、
+  复现检查运行/历史/载入/导出、时间线 Markdown / 事件 CSV（支持类型/类别/关键词/
+  时间窗过滤）/ 报告 / 取证报告（Markdown+JSON）导出、双快照对比与 Markdown 对比导出、
+  数据库完整性检查/在线备份/压缩、人工状态变更（线索状态/任务完成与重开）、
+  模块入口路由（`--version`/`--help` 不启动 GUI）、错误退出码；
+  并已用 `scripts/demo_lab` 实跑 scan→analyze→leads→repro→dossiers 全链路。
 - 项目级扫描排除（2026-11-06）：v7 迁移为 projects 增加 excludes 列（旧库重复列容忍）；
   GUI「扫描选项…」与 CLI `config` 保存，`scan --exclude` 覆盖本次；支持名称与通配符
   （`*.log`、`build*`）；`tests/test_db.py` / `tests/test_scanner.py` / `tests/test_cli.py`
